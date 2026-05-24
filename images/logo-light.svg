@@ -1,7 +1,0 @@
-<svg width="160" height="32" viewBox="0 0 160 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Icon mark -->
-  <rect width="32" height="32" rx="7" fill="#1D9E75"/>
-  <path d="M9 8h4v7h8V8h4v16h-4v-6H13v6H9V8z" fill="white"/>
-  <!-- Wordmark -->
-  <text x="42" y="22" font-family="Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="18" font-weight="600" fill="#18181b" letter-spacing="-0.02em">Humain</text>
-</svg>

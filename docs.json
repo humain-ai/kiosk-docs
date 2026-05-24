@@ -3,13 +3,13 @@
   "theme": "mint",
   "name": "Humain Kiosk",
   "colors": {
-    "primary": "#1D9E75",
-    "light": "#4fc49a",
-    "dark": "#12614a"
+    "primary": "#146EF5",
+    "light": "#9DC2FB",
+    "dark": "#063E92"
   },
   "logo": {
-    "light": "/images/logo-light.svg",
-    "dark": "/images/logo-dark.svg"
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
   },
   "favicon": "/favicon.svg",
   "navbar": {
