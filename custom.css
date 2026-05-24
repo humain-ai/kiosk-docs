@@ -4,7 +4,7 @@
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: #1D9E75;
+  background: var(--primary, #0E50BD);
   border: none;
   cursor: pointer;
   display: flex;
@@ -16,7 +16,7 @@
 }
 
 .hk-voice-btn:hover:not(:disabled) {
-  background: #12614a;
+  background: var(--primary-dark, #0a3d8f);
   transform: scale(1.05);
 }
 
@@ -29,14 +29,15 @@
   cursor: not-allowed;
 }
 
-.hk-voice-btn.listening {
+.hk-voice-btn.listening,
+.hk-voice-btn.active {
   animation: hk-pulse 1.8s ease-in-out infinite;
 }
 
 @keyframes hk-pulse {
-  0%   { box-shadow: 0 0 0 0   rgba(29, 158, 117, 0.45); }
-  60%  { box-shadow: 0 0 0 22px rgba(29, 158, 117, 0);    }
-  100% { box-shadow: 0 0 0 0   rgba(29, 158, 117, 0);    }
+  0%   { box-shadow: 0 0 0 0   rgba(14, 80, 189, 0.45); }
+  60%  { box-shadow: 0 0 0 22px rgba(14, 80, 189, 0);    }
+  100% { box-shadow: 0 0 0 0   rgba(14, 80, 189, 0);    }
 }
 
 /* ─── Status indicator ─────────────────────────────────────────────────────── */
@@ -117,14 +118,14 @@
 }
 
 .hk-mode-toggle button.active {
-  background: #ffffff;
-  color: #111827;
+  background: var(--primary, #0E50BD);
+  color: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .dark .hk-mode-toggle button.active {
-  background: #3f3f46;
-  color: #fafafa;
+  background: var(--primary, #0E50BD);
+  color: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 

@@ -56,7 +56,7 @@ export default function WidgetPreview() {
           {/* Header */}
           <div style={{
             padding: '14px 16px',
-            background: '#1D9E75',
+            background: '#0E50BD',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -104,7 +104,7 @@ export default function WidgetPreview() {
                   maxWidth: '78%',
                   padding: '8px 12px',
                   borderRadius: m.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-                  background: m.role === 'user' ? '#1D9E75' : '#f3f4f6',
+                  background: m.role === 'user' ? '#0E50BD' : '#f3f4f6',
                   color: m.role === 'user' ? 'white' : '#111827',
                   fontSize: 13,
                   lineHeight: 1.5,
@@ -145,7 +145,7 @@ export default function WidgetPreview() {
                 padding: '8px 14px',
                 borderRadius: 8,
                 border: 'none',
-                background: '#1D9E75',
+                background: '#0E50BD',
                 color: 'white',
                 fontWeight: 600,
                 fontSize: 13,
@@ -167,13 +167,13 @@ export default function WidgetPreview() {
           width: 56,
           height: 56,
           borderRadius: '50%',
-          background: '#1D9E75',
+          background: '#0E50BD',
           border: 'none',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          boxShadow: '0 4px 16px rgba(29,158,117,0.4)',
+          boxShadow: '0 4px 16px rgba(14,80,189,0.4)',
           transition: 'transform 0.15s ease',
         }}
       >

@@ -18,20 +18,20 @@ Humain handles the AI.
 ## Integration paths
 
 <Columns cols={2}>
-  <Card title="SIP trunk (PBX)" icon="server">
+  <Card title="SIP trunk (PBX)" icon="server" href="/voip/sip-gateway">
     Configure your PBX (Asterisk, FreeSWITCH, 3CX, or any SIP-compatible system) to route
     calls to the Humain SIP endpoint. Best for high-volume call centres with existing
     telephony infrastructure.
   </Card>
-  <Card title="VoIP adapter (ATA)" icon="plug">
-    Plug an Analog Telephone Adapter between an analogue phone line and your network. The ATA
-    converts PSTN audio to SIP. Best for physical kiosk terminals with a dedicated phone handset.
+  <Card title="Asterisk / FreePBX" icon="circle-asterisk" href="/voip/asterisk-agi">
+    Write a dialplan and AGI script for full control over call flow, DTMF handling, and
+    mid-call transfers. Or use the FreePBX GUI module for zero-code setup.
   </Card>
-  <Card title="Twilio / CPaaS bridge" icon="cloud">
-    Use a Twilio Studio flow or similar CPaaS to forward calls to the Humain SIP endpoint.
-    Lets you add SMS fallback, recording, and call analytics on top of the Humain AI.
+  <Card title="Twilio / Vonage / Telnyx" icon="cloud" href="/voip/twilio">
+    Route cloud telephony calls to a Humain Kiosk session via webhooks and the provider's
+    audio streaming API. Lets you add SMS fallback, recording, and call analytics.
   </Card>
-  <Card title="Mobile app (SIP client)" icon="mobile">
+  <Card title="Mobile app (SIP client)" icon="mobile" href="/mobile/ios-swift">
     Embed a SIP stack (PJSIP, linphone) in your iOS/Android app. The app registers against
     the Humain SIP endpoint and calls are handled like any other SIP call.
   </Card>
@@ -77,7 +77,7 @@ sequenceDiagram
 
     ```bash
     curl -X POST https://api.humain.ai/v1/sessions \
-      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+      -H "Authorization: Bearer hk_live_your_credential_here" \
       -H "Content-Type: application/json" \
       -d '{"mode":"voip"}'
     ```

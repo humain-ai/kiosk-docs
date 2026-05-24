@@ -136,6 +136,10 @@ switch (err) {
         kiosk_session_close(session);
         kiosk_session_open(client, KIOSK_SESSION_TEXT, &session);
         break;
+    case KIOSK_ERR_PROVIDER:
+        fprintf(stderr, "Provider temporarily unavailable: %s\n", kiosk_error_string(err));
+        sleep(2); /* brief back-off before retry */
+        break;
     case KIOSK_ERR_NETWORK:
     case KIOSK_ERR_TIMEOUT:
         fprintf(stderr, "Transient error: %s — retrying\n", kiosk_error_string(err));
@@ -184,28 +188,28 @@ switch (err) {
 
 ## Error codes
 
-| Code | Value | Meaning |
-|---|---|---|
-| `KIOSK_OK` | 0 | Success |
-| `KIOSK_ERR_INVALID_ARG` | 1 | A required argument was NULL or invalid |
-| `KIOSK_ERR_NETWORK` | 2 | DNS, TCP, or TLS failure |
-| `KIOSK_ERR_AUTH` | 3 | Credential missing, malformed, or revoked (HTTP 401) |
-| `KIOSK_ERR_INACTIVE` | 4 | Kiosk is disabled in the admin panel (HTTP 403) |
-| `KIOSK_ERR_BLOCKED` | 5 | Request blocked by a guardrail rule (HTTP 403) |
-| `KIOSK_ERR_RATE_LIMITED` | 6 | Rate limit exceeded — call `kiosk_retry_after()` (HTTP 429) |
-| `KIOSK_ERR_REJECTED` | 7 | Message rejected by content policy (HTTP 422) |
-| `KIOSK_ERR_SESSION_ENDED` | 8 | Session already closed (HTTP 410) |
-| `KIOSK_ERR_PROVIDER` | 9 | Upstream AI provider error (HTTP 502) |
-| `KIOSK_ERR_PLAN_LIMIT` | 10 | Workspace plan limit reached (HTTP 402) |
-| `KIOSK_ERR_INTERNAL` | 11 | Unexpected server error (HTTP 5xx) |
-| `KIOSK_ERR_TIMEOUT` | 12 | Request or connection timed out |
-| `KIOSK_ERR_OUT_OF_MEMORY` | 13 | Memory allocation failed |
+| Code | Value | Trigger | Retry strategy |
+|---|---|---|---|
+| `KIOSK_OK` | 0 | Success | — |
+| `KIOSK_ERR_INVALID_ARG` | 1 | A required argument was NULL or invalid | Fix caller code — do not retry |
+| `KIOSK_ERR_NETWORK` | 2 | DNS, TCP, or TLS failure | Exponential back-off (1 s, 2 s, 4 s) |
+| `KIOSK_ERR_AUTH` | 3 | Credential missing, malformed, or revoked (HTTP 401) | Fix credential — do not retry |
+| `KIOSK_ERR_INACTIVE` | 4 | Kiosk is disabled in the admin panel (HTTP 403) | Activate kiosk — do not retry |
+| `KIOSK_ERR_BLOCKED` | 5 | Credential blocked by FraudGuard (HTTP 403) | Wait `blocked_until` — do not retry |
+| `KIOSK_ERR_RATE_LIMITED` | 6 | Rate limit exceeded — call `kiosk_retry_after()` (HTTP 429) | Retry after `kiosk_retry_after()` seconds |
+| `KIOSK_ERR_REJECTED` | 7 | Message rejected by content policy (HTTP 400) | Do not retry — show neutral message |
+| `KIOSK_ERR_SESSION_ENDED` | 8 | Session already closed (HTTP 400) | Open a new session |
+| `KIOSK_ERR_PROVIDER` | 9 | Upstream AI provider error (HTTP 503) | Exponential back-off (1 s, 2 s, 4 s) |
+| `KIOSK_ERR_PLAN_LIMIT` | 10 | Workspace plan limit reached (HTTP 402) | Upgrade plan — do not retry |
+| `KIOSK_ERR_INTERNAL` | 11 | Unexpected server error (HTTP 500) | Exponential back-off; contact support if persistent |
+| `KIOSK_ERR_TIMEOUT` | 12 | Request or connection timed out | Retry immediately once, then back-off |
+| `KIOSK_ERR_OUT_OF_MEMORY` | 13 | Memory allocation failed | Increase heap or reduce buffer size |
 
 ---
 
 ## Memory model
 
-<Accordion title="Ownership and buffer sizing">
+<Accordion title="Memory model">
   **Client and session handles** — the library allocates these internally.
   `kiosk_client_destroy()` frees the client; `kiosk_session_close()` frees the session.
   Never free these pointers yourself.
@@ -234,7 +238,7 @@ switch (err) {
 
 ## Thread safety
 
-<Accordion title="Thread safety guarantees">
+<Accordion title="Thread safety">
   | Object | Thread safety |
   |---|---|
   | `kiosk_client_t` | Safe to call `kiosk_session_open()` concurrently from multiple threads |

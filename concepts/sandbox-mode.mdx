@@ -3,6 +3,8 @@ title: "Sandbox"
 description: "Test your integration against a realistic API without consuming LLM credits or generating billing events."
 ---
 
+import CredentialWarning from '/snippets/credential-warning.mdx';
+
 ## What is the sandbox?
 
 The sandbox is a parallel environment that mirrors the production API surface exactly. Requests go
@@ -34,12 +36,16 @@ identical.
 Your device credentials (`hk_live_…`) work against both environments. The environment is determined
 solely by the base URL you call — not the token.
 
+<CredentialWarning />
+
 <Warning>
   There is no separate sandbox token. The same credential works on both URLs. Be careful not to
   accidentally point a production device at the sandbox base URL.
 </Warning>
 
 ## Stub AI responses
+
+### Text sessions
 
 In sandbox mode the LLM is replaced with a stub that returns a short, predictable response:
 
@@ -52,6 +58,17 @@ In sandbox mode the LLM is replaced with a stub that returns a short, predictabl
 
 Guardrail rules and FraudGuard run normally — a blocked phrase will still return `INPUT_REJECTED`
 in the sandbox. This lets you test your error-handling paths without needing a real LLM.
+
+### Voice sessions
+
+Voice sessions in sandbox mode still run the full WebRTC pipeline — ICE negotiation, DTLS
+handshake, and Opus audio transport all function normally. Instead of live STT, LLM, and TTS,
+the server responds with a short pre-recorded audio clip:
+
+> *"[Sandbox] This is a test response from the Humain voice sandbox."*
+
+This allows you to verify your WebRTC signalling, audio routing, and `VoiceStatus` state
+machine without consuming any AI credits.
 
 ## What is and isn't simulated
 

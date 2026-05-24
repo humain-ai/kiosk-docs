@@ -39,10 +39,10 @@ custom code.
 <CodeGroup>
 ```text Generic softphone (SIP URI)
 # Register this URI in any SIP softphone or ATA
-sip:hk_live_YOUR_TOKEN@sip.humain.ai
+sip:hk_live_your_credential_here@sip.humain.ai
 
 # Example with explicit transport
-sip:hk_live_YOUR_TOKEN@sip.humain.ai;transport=tls
+sip:hk_live_your_credential_here@sip.humain.ai;transport=tls
 ```
 
 ```ini Asterisk PJSIP trunk (pjsip.conf)
@@ -51,8 +51,8 @@ sip:hk_live_YOUR_TOKEN@sip.humain.ai;transport=tls
 [humain-auth]
 type=auth
 auth_type=userpass
-username=hk_live_YOUR_TOKEN
-password=hk_live_YOUR_TOKEN
+username=hk_live_your_credential_here
+password=hk_live_your_credential_here
 
 [humain-aor]
 type=aor
@@ -63,7 +63,7 @@ type=endpoint
 transport=transport-tls
 outbound_auth=humain-auth
 aors=humain-aor
-from_user=hk_live_YOUR_TOKEN
+from_user=hk_live_your_credential_here
 from_domain=sip.humain.ai
 dtmf_mode=rfc4733
 allow=!all,ulaw,alaw,g722
@@ -72,15 +72,15 @@ allow=!all,ulaw,alaw,g722
 type=registration
 outbound_auth=humain-auth
 server_uri=sip:sip.humain.ai:5061
-client_uri=sip:hk_live_YOUR_TOKEN@sip.humain.ai:5061
+client_uri=sip:hk_live_your_credential_here@sip.humain.ai:5061
 retry_interval=60
 ```
 
 ```ini FreeSWITCH gateway (sofia.conf.xml)
 <!-- /etc/freeswitch/sip_profiles/external/humain.xml -->
 <gateway name="humain">
-  <param name="username"   value="hk_live_YOUR_TOKEN"/>
-  <param name="password"   value="hk_live_YOUR_TOKEN"/>
+  <param name="username"   value="hk_live_your_credential_here"/>
+  <param name="password"   value="hk_live_your_credential_here"/>
   <param name="realm"      value="sip.humain.ai"/>
   <param name="proxy"      value="sip.humain.ai:5061"/>
   <param name="register"   value="true"/>
@@ -93,8 +93,8 @@ retry_interval=60
 # Quick connectivity test — sends one call, records media, hangs up after 10 s
 sipp sip.humain.ai:5061 \
   -sf uac.xml \
-  -au hk_live_YOUR_TOKEN \
-  -ap hk_live_YOUR_TOKEN \
+  -au hk_live_your_credential_here \
+  -ap hk_live_your_credential_here \
   -d 10000 \
   -r 1 \
   -tls-cert client.pem \

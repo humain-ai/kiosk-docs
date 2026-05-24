@@ -1,4 +1,4 @@
----
+﻿---
 title: "Zephyr RTOS"
 description: "Integrate the Humain Kiosk C library into a Zephyr application — Kconfig options, CMakeLists.txt, and a minimal sample."
 icon: "zap"
@@ -53,7 +53,7 @@ CONFIG_MBEDTLS_HEAP_SIZE=65536
 
 # Humain Kiosk module
 CONFIG_HUMAIN_KIOSK=y
-CONFIG_HUMAIN_KIOSK_CREDENTIAL="hk_live_your_token_here"
+CONFIG_HUMAIN_KIOSK_CREDENTIAL="hk_live_your_credential_here"
 CONFIG_HUMAIN_KIOSK_TIMEOUT_MS=20000
 CONFIG_HUMAIN_KIOSK_MAX_RETRIES=5
 CONFIG_HUMAIN_KIOSK_SANDBOX=n
@@ -188,7 +188,7 @@ west espressif monitor  # or: picocom -b 115200 /dev/ttyACM0
 
 You should see:
 
-```
+```text
 Humain Kiosk — Zephyr sample
 Session open. Sending message...
 AI: We are open Monday to Friday, 9 AM to 6 PM...

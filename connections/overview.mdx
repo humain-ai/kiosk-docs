@@ -27,6 +27,15 @@ determines which transport patterns are available.
   </Card>
 </Columns>
 
+## Comparison
+
+| | REST | WebSocket | WebRTC voice | VoIP / SIP |
+|---|---|---|---|---|
+| Response style | Full response after inference | Streamed token-by-token | Real-time audio | Real-time audio |
+| Best for | Backend integrations, low-frequency calls | Chat UIs, kiosk touchscreens | Hands-free terminals, drive-throughs | Call centres, IVR, PSTN callers |
+| Requires | HTTPS client | WebSocket client | WebRTC runtime (browser or pion) | SIP stack or PBX |
+| Testable in browser | ✅ Yes | ✅ Yes | ✅ Yes (with mic permission) | ❌ No — needs telephony hardware |
+
 ## Which one should I use?
 
 | Scenario | Recommended transport |

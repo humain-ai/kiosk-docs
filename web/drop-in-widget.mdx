@@ -1,10 +1,11 @@
 ---
 title: "Drop-in widget"
 description: "Add a floating chat widget to any webpage with a single script tag. No build step, no framework required."
-icon: "code"
+icon: "layout-2"
 ---
 
 import WidgetPreview from '/snippets/widget-preview.jsx';
+import InstallJs from '/snippets/install-js.mdx';
 import CredentialWarning from '/snippets/credential-warning.mdx';
 import SandboxTip from '/snippets/sandbox-tip.mdx';
 
@@ -28,10 +29,27 @@ Paste these two tags before `</body>` in your HTML:
 </script>
 ```
 
-That's it. The widget loads asynchronously and does not block your page render.
+The widget loads asynchronously and does not block your page render.
 
 <SandboxTip />
 <CredentialWarning />
+
+<Accordion title="Install via npm (module bundlers)">
+  If you are using a bundler (webpack, Vite, Rollup), install the npm package instead of the CDN
+  script and call `init()` in your entry point:
+
+  <InstallJs />
+
+  ```javascript
+  import { HumainWidget } from "@humain/kiosk-js/widget"
+
+  HumainWidget.init({
+    credential: "hk_live_your_credential_here",
+    position: "bottom-right",
+    theme: "auto",
+  })
+  ```
+</Accordion>
 
 ## Configuration options
 
@@ -41,7 +59,7 @@ That's it. The widget loads asynchronously and does not block your page render.
 | `mode` | `"sandbox"` \| `"live"` | `"live"` | Environment — use `"sandbox"` during development |
 | `position` | `"bottom-right"` \| `"bottom-left"` | `"bottom-right"` | Corner where the widget appears |
 | `theme` | `"light"` \| `"dark"` \| `"auto"` | `"auto"` | Colour scheme — `"auto"` follows the OS preference |
-| `primaryColor` | `string` | `"#1D9E75"` | Accent colour used for the FAB and message bubbles (hex) |
+| `primaryColor` | `string` | `"#0E50BD"` | Accent colour used for the FAB and message bubbles (hex) |
 | `title` | `string` | `"Kiosk"` | Text shown in the widget header |
 | `placeholder` | `string` | `"Type a message…"` | Input field placeholder text |
 | `initialMessage` | `string` | — | Message displayed automatically when the widget first opens |

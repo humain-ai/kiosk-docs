@@ -1,7 +1,7 @@
 ---
 title: "Vanilla JavaScript"
 description: "Use the @humain/kiosk-js core client with plain DOM APIs — no framework required."
-icon: "code"
+icon: "brand-nodejs"
 ---
 
 import InstallJs from '/snippets/install-js.mdx';
@@ -41,11 +41,11 @@ build tools needed.
     body { font-family: system-ui, sans-serif; max-width: 520px; margin: 40px auto; padding: 0 16px; }
     #messages { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; min-height: 200px;
                 max-height: 400px; overflow-y: auto; margin-bottom: 12px; }
-    .user      { text-align: right; color: #1D9E75; margin: 6px 0; }
+    .user      { text-align: right; color: #0E50BD; margin: 6px 0; }
     .assistant { text-align: left; color: #111827;  margin: 6px 0; }
     #form      { display: flex; gap: 8px; }
     input      { flex: 1; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 6px; }
-    button     { padding: 8px 16px; background: #1D9E75; color: white; border: none;
+    button     { padding: 8px 16px; background: #0E50BD; color: white; border: none;
                  border-radius: 6px; cursor: pointer; font-weight: 600; }
     button:disabled { opacity: 0.5; cursor: default; }
   </style>
@@ -64,7 +64,7 @@ import { HumainKioskClient } from "@humain/kiosk-js"
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-const kiosk   = new HumainKioskClient({ credential: "hk_live_YOUR_TOKEN", mode: "sandbox" })
+const kiosk   = new HumainKioskClient({ credential: "hk_live_your_credential_here", mode: "sandbox" })
 const session = await kiosk.openSession()
 
 const $messages = document.getElementById("messages")

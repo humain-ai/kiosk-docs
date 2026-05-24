@@ -134,11 +134,12 @@ paths:
         {"input": "What are your opening hours?"}
         ```
 
-        **Receiving tokens** — the server streams:
+        **Receiving events** — the server streams typed frames:
         ```json
-        {"type": "token", "token": "We "}
-        {"type": "token", "token": "are "}
-        {"type": "done", "actions_called": []}
+        {"type": "turn_start"}
+        {"type": "chunk", "content": "We "}
+        {"type": "chunk", "content": "are open Monday to Friday."}
+        {"type": "turn_end", "message_count": 2}
         ```
 
         **Errors** — the server sends a close frame with a 4xxx code on fatal errors.
@@ -160,7 +161,7 @@ paths:
       description: |
         Closes the session, flushes usage events, and releases server resources.
         Always call this endpoint when the conversation ends — sessions left open are
-        cleaned up automatically after 30 minutes, but calling end explicitly is faster
+        cleaned up automatically after 4 hours of inactivity, but calling end explicitly is faster
         and more accurate for billing.
       parameters:
         - $ref: "#/components/parameters/SessionId"
@@ -361,7 +362,16 @@ components:
       description: |
         Valid token but the request is not permitted. One of:
         - `KIOSK_INACTIVE` — the kiosk's status is not *active*
-        - `CREDENTIAL_BLOCKED` — FraudGuard blocked this credential
+        - `CREDENTIAL_BLOCKED` — FraudGuard blocked this credential. When returned, the response
+          includes a `Retry-After` header with the number of seconds until the block expires.
+      headers:
+        Retry-After:
+          description: |
+            Seconds until the credential block expires. Only present when `error` is
+            `CREDENTIAL_BLOCKED`. Do not retry before this time has elapsed.
+          schema:
+            type: integer
+            example: 3600
       content:
         application/json:
           schema:
@@ -378,7 +388,9 @@ components:
               value:
                 error: CREDENTIAL_BLOCKED
                 message: This credential has been blocked due to suspicious activity.
-                details: {}
+                details:
+                  blocked_until: "2026-05-24T15:30:00Z"
+                  reason: Excessive rate-limit violations
 
     PlanLimitReached:
       description: The workspace has reached its plan's session limit.
@@ -394,6 +406,13 @@ components:
     RateLimited:
       description: |
         Too many requests. Slow down and retry after `details.retry_after_seconds`.
+        A `Retry-After` header is also included with the same value for HTTP-standard clients.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying. Mirrors `details.retry_after_seconds`.
+          schema:
+            type: integer
+            example: 60
       content:
         application/json:
           schema:

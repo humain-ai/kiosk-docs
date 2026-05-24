@@ -35,7 +35,7 @@ sequenceDiagram
     <CodeGroup>
     ```bash cURL
     curl -X POST https://api.humain.ai/v1/sessions \
-      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+      -H "Authorization: Bearer hk_live_your_credential_here" \
       -H "Content-Type: application/json" \
       -d '{"mode":"text"}'
     # → {"session_id":"3fa85f64-5717-4562-b3fc-2c963f66afa6"}
@@ -45,7 +45,7 @@ sequenceDiagram
     const { session_id } = await fetch('https://api.humain.ai/v1/sessions', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer hk_live_YOUR_TOKEN',
+        'Authorization': 'Bearer hk_live_your_credential_here',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ mode: 'text' }),
@@ -61,7 +61,7 @@ sequenceDiagram
     body := strings.NewReader(`{"mode":"text"}`)
     req, _ := http.NewRequestWithContext(ctx, "POST",
         "https://api.humain.ai/v1/sessions", body)
-    req.Header.Set("Authorization", "Bearer hk_live_YOUR_TOKEN")
+    req.Header.Set("Authorization", "Bearer hk_live_your_credential_here")
     req.Header.Set("Content-Type", "application/json")
     resp, _ := http.DefaultClient.Do(req)
     ```
@@ -74,8 +74,8 @@ sequenceDiagram
 
     <CodeGroup>
     ```bash cURL
-    curl -X POST https://api.humain.ai/v1/sessions/SESSION_ID/message \
-      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+    curl -X POST https://api.humain.ai/v1/sessions/$SESSION_ID/message \
+      -H "Authorization: Bearer hk_live_your_credential_here" \
       -H "Content-Type: application/json" \
       -d '{"input":"What are your opening hours?"}'
     # → {"response":"We are open Monday to Friday, 9 AM–6 PM.","actions_called":[]}
@@ -87,7 +87,7 @@ sequenceDiagram
       {
         method: 'POST',
         headers: {
-          'Authorization': 'Bearer hk_live_YOUR_TOKEN',
+          'Authorization': 'Bearer hk_live_your_credential_here',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ input: userText }),
@@ -111,7 +111,7 @@ sequenceDiagram
     req, _ := http.NewRequestWithContext(ctx, "POST",
         "https://api.humain.ai/v1/sessions/"+sessionID+"/message",
         strings.NewReader(payload))
-    req.Header.Set("Authorization", "Bearer hk_live_YOUR_TOKEN")
+    req.Header.Set("Authorization", "Bearer hk_live_your_credential_here")
     req.Header.Set("Content-Type", "application/json")
     resp, _ := http.DefaultClient.Do(req)
     ```
@@ -123,15 +123,15 @@ sequenceDiagram
 
     <CodeGroup>
     ```bash cURL
-    curl -X POST https://api.humain.ai/v1/sessions/SESSION_ID/end \
-      -H "Authorization: Bearer hk_live_YOUR_TOKEN"
+    curl -X POST https://api.humain.ai/v1/sessions/$SESSION_ID/end \
+      -H "Authorization: Bearer hk_live_your_credential_here"
     # → 204 No Content
     ```
 
     ```javascript JavaScript
     await fetch(`https://api.humain.ai/v1/sessions/${session_id}/end`, {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer hk_live_YOUR_TOKEN' },
+      headers: { 'Authorization': 'Bearer hk_live_your_credential_here' },
     });
     ```
 
@@ -142,7 +142,7 @@ sequenceDiagram
     ```go Go
     req, _ := http.NewRequestWithContext(ctx, "POST",
         "https://api.humain.ai/v1/sessions/"+sessionID+"/end", nil)
-    req.Header.Set("Authorization", "Bearer hk_live_YOUR_TOKEN")
+    req.Header.Set("Authorization", "Bearer hk_live_your_credential_here")
     http.DefaultClient.Do(req)
     ```
     </CodeGroup>

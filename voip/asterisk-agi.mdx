@@ -1,7 +1,7 @@
 ---
 title: "Asterisk AGI integration"
 description: "Route inbound calls to a Humain Kiosk session using an Asterisk AGI script and PJSIP trunk."
-icon: "terminal"
+icon: "circle-asterisk"
 ---
 
 import VoipCredentialNote from '/snippets/voip-credential-note.mdx';
@@ -25,8 +25,8 @@ Requires: **Asterisk 18+**, **Python 3.9+**.
     [humain-auth]
     type=auth
     auth_type=userpass
-    username=hk_live_YOUR_TOKEN
-    password=hk_live_YOUR_TOKEN
+    username=hk_live_your_credential_here
+    password=hk_live_your_credential_here
 
     [humain-aor]
     type=aor
@@ -37,7 +37,7 @@ Requires: **Asterisk 18+**, **Python 3.9+**.
     transport=transport-tls
     outbound_auth=humain-auth
     aors=humain-aor
-    from_user=hk_live_YOUR_TOKEN
+    from_user=hk_live_your_credential_here
     from_domain=sip.humain.ai
     dtmf_mode=rfc4733
     allow=!all,ulaw,alaw,g722
@@ -46,7 +46,7 @@ Requires: **Asterisk 18+**, **Python 3.9+**.
     type=registration
     outbound_auth=humain-auth
     server_uri=sip:sip.humain.ai:5061
-    client_uri=sip:hk_live_YOUR_TOKEN@sip.humain.ai:5061
+    client_uri=sip:hk_live_your_credential_here@sip.humain.ai:5061
     retry_interval=60
     ```
 
@@ -84,7 +84,7 @@ Requires: **Asterisk 18+**, **Python 3.9+**.
     humain_kiosk.py — Asterisk AGI bridge for Humain Kiosk voice sessions.
 
     Usage in dialplan:
-        AGI(humain_kiosk.py,hk_live_YOUR_TOKEN)
+        AGI(humain_kiosk.py,hk_live_your_credential_here)
     """
 
     import sys
@@ -185,7 +185,7 @@ Requires: **Asterisk 18+**, **Python 3.9+**.
     exten => _X.,1,NoOp(Routing ${EXTEN} to Humain Kiosk)
      same => n,Answer()
      same => n,Wait(1)
-     same => n,AGI(humain_kiosk.py,hk_live_YOUR_TOKEN)
+     same => n,AGI(humain_kiosk.py,hk_live_your_credential_here)
      same => n,Hangup()
 
     ; Optionally play a fallback message if the AGI fails
@@ -237,7 +237,7 @@ Requires: **Asterisk 18+**, **Python 3.9+**.
    same => n,Dial(PJSIP/${EXTEN}@live-agent-endpoint,60)
    same => n,Hangup()
 
-  exten => _X.,n(ai),AGI(humain_kiosk.py,hk_live_YOUR_TOKEN)
+  exten => _X.,n(ai),AGI(humain_kiosk.py,hk_live_your_credential_here)
    same => n,Hangup()
   ```
 </Accordion>

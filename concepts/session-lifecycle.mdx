@@ -14,7 +14,7 @@ flowchart LR
   D --> F[POST …/end\nendSession]
   E --> F
   F --> G([Done])
-  C -->|abandoned| H([Auto-closed\nafter 30 min])
+  C -->|abandoned| H([Auto-closed\nafter 4 hours])
 ```
 
 Each conversation starts by calling `POST /v1/sessions`, which returns a `session_id`. Every
@@ -37,8 +37,8 @@ ends, call `POST /v1/sessions/{sid}/end` to close it cleanly.
     ```
   </Step>
   <Step title="Interact">
-    While the session is open, the device sends messages (text mode) or streams audio (voice mode).
-    Each turn runs through the full pipeline:
+    While the session is open, the device sends messages (text mode), streams real-time audio
+    (voice mode), or bridges a telephone call (voip mode). Each turn runs through the full pipeline:
 
     1. FraudGuard checks the input.
     2. Guardrail rules gate the input.
@@ -73,8 +73,8 @@ usage events or build your own persistence layer on top of the API.
 If the device disconnects without calling `POST /v1/sessions/{sid}/end`, the session is cleaned up
 automatically:
 
-- A background worker runs every **30 minutes**.
-- Sessions with no activity for 30 minutes are marked abandoned and closed.
+- A background worker scans for idle sessions periodically.
+- Sessions with no activity for **4 hours** are marked abandoned and closed.
 - Usage data is flushed as part of the cleanup.
 
 <Note>
@@ -96,4 +96,4 @@ separate guardrail counters.
 | Sustained rate limit | Per session | Configurable in guardrail rules |
 | Conversation history | Per session | 8,000 tokens |
 | Tool calls per turn | Per session | 5 |
-| Auto-abandonment | Per session | 30 minutes of inactivity |
+| Auto-abandonment | Per session | 4 hours of inactivity |

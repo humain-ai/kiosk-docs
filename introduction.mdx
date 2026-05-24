@@ -8,10 +8,11 @@ uploads knowledge documents, and sets behavioural guardrails in the admin panel.
 terminals, VoIP adapters, website widgets — authenticate with per-device API tokens and talk to users.
 All intelligence runs server-side. Devices are thin clients.
 
-<Info>
-  **New here?** Start by opening the admin panel, creating a workspace, and issuing your first device
-  credential. Then come back and follow the [Quick start](#quick-start) below.
-</Info>
+<Tip>
+  Use **sandbox mode** (`https://sandbox.api.humain.ai`) during development. Responses are
+  deterministic, no AI credits are consumed, and billing events are not generated. Switch to
+  the production URL when you are ready to go live.
+</Tip>
 
 ## What you can build
 
@@ -53,42 +54,19 @@ All intelligence runs server-side. Devices are thin clients.
 ## Quick start
 
 <Steps>
-  <Step title="Create a workspace">
-    Sign in to the [admin panel](https://app.humain.ai) and create a workspace. A workspace
-    holds all your kiosk configurations, documents, and credentials.
-  </Step>
   <Step title="Configure a kiosk">
-    Inside your workspace, create a kiosk. Give it a persona (name, tone, language),
-    attach knowledge documents, and set guardrail rules.
+    Sign in to the [admin panel](https://app.humain.ai), create a workspace, and add a kiosk.
+    Give the kiosk a persona, attach knowledge documents, and set your guardrail rules.
   </Step>
   <Step title="Issue a device credential">
     Go to **Kiosk → Credentials → Issue new credential**. Copy the token — it is shown
-    only once. Your device uses this token in the `Authorization` header.
+    only once. Store it in a secret manager immediately. Your device uses this token in every
+    `Authorization: Bearer` header.
   </Step>
-  <Step title="Open a session and send a message">
-    With your credential in hand, make two API calls:
-
-    ```bash
-    # 1. Open a session
-    SESSION=$(curl -s -X POST https://api.humain.ai/v1/sessions \
-      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{"mode":"text"}' | jq -r .session_id)
-
-    # 2. Send a message
-    curl -s -X POST "https://api.humain.ai/v1/sessions/$SESSION/message" \
-      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{"input":"Hello, what can you help me with?"}'
-    ```
-  </Step>
-  <Step title="End the session">
-    Always close the session when the conversation finishes to flush usage data.
-
-    ```bash
-    curl -s -X POST "https://api.humain.ai/v1/sessions/$SESSION/end" \
-      -H "Authorization: Bearer hk_live_YOUR_TOKEN"
-    ```
+  <Step title="Open a session">
+    Call `POST /v1/sessions` with `{"mode":"text"}` to start a conversation. Then call
+    `POST /v1/sessions/{id}/message` for each user turn, and `POST /v1/sessions/{id}/end` when
+    done. See [Try it out](/playground/text) for a live interactive demo.
   </Step>
 </Steps>
 

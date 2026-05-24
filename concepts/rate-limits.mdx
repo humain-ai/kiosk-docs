@@ -7,9 +7,9 @@ description: "Humain applies rate limits at two levels — per-credential burst 
 
 ### Burst protection (per credential)
 
-A short sliding window (10 seconds) caps the number of requests any single credential can send.
-This protects against runaway devices and credential misuse. When exceeded, the API returns `429
-RATE_LIMITED`.
+A short sliding window of **10 seconds** caps the number of requests any single credential can send.
+When exceeded, the credential is blocked for **60 seconds** and the API returns `429 RATE_LIMITED`
+with `retry_after_seconds: 60`. This protects against runaway devices and credential misuse.
 
 ### Sustained rate limit (per session)
 
@@ -24,17 +24,20 @@ When either limit is hit the API returns:
 ```http
 HTTP/1.1 429 Too Many Requests
 Content-Type: application/json
+Retry-After: 60
 
 {
   "error": "RATE_LIMITED",
   "message": "Rate limit exceeded.",
   "details": {
-    "retry_after_seconds": 30
+    "retry_after_seconds": 60
   }
 }
 ```
 
-Always read `details.retry_after_seconds` and back off for at least that long before retrying.
+The response includes both a standard `Retry-After` HTTP header and `details.retry_after_seconds`
+in the body — they carry the same value. Standard HTTP clients (curl, many libraries) can read
+the header directly. Read either source and wait at least that many seconds before retrying.
 
 ## Retry strategy
 

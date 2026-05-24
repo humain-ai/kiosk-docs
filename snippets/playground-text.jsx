@@ -74,7 +74,7 @@ function Message({ role, text }) {
         padding: '8px 12px',
         borderRadius: isUser ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
         background: isUser
-          ? 'var(--primary, #1D9E75)'
+          ? 'var(--primary, #0E50BD)'
           : 'var(--surface-muted, #f3f4f6)',
         color: isUser ? 'white' : 'var(--text-primary, #111827)',
         fontSize: 14,
@@ -200,8 +200,8 @@ export default function PlaygroundText() {
 
       ws.onmessage = (e) => {
         const frame = JSON.parse(e.data);
-        if (frame.type === 'token') {
-          buffer += frame.token;
+        if (frame.type === 'chunk') {
+          buffer += frame.content;
           setMessages(prev => {
             const last = prev[prev.length - 1];
             if (last?.role === 'ai-streaming') {
@@ -211,7 +211,7 @@ export default function PlaygroundText() {
           });
           setTimeout(scrollToBottom, 50);
         }
-        if (frame.type === 'done') {
+        if (frame.type === 'turn_end') {
           setMessages(prev => {
             const last = prev[prev.length - 1];
             if (last?.role === 'ai-streaming') {
@@ -219,7 +219,7 @@ export default function PlaygroundText() {
             }
             return prev;
           });
-          setRawResponse(`WS DONE\n\n${JSON.stringify(frame, null, 2)}`);
+          setRawResponse(`WS TURN_END\n\n${JSON.stringify(frame, null, 2)}`);
           ws.close();
           resolve();
         }
@@ -338,7 +338,7 @@ export default function PlaygroundText() {
                 padding: '8px 16px',
                 borderRadius: 6,
                 border: 'none',
-                background: 'var(--primary, #1D9E75)',
+                background: 'var(--primary, #0E50BD)',
                 color: 'white',
                 fontWeight: 600,
                 fontSize: 13,
@@ -377,13 +377,13 @@ export default function PlaygroundText() {
           gap: 6,
           padding: '4px 10px',
           borderRadius: 100,
-          background: '#d1fae5',
-          color: '#065f46',
+          background: '#dbeafe',
+          color: '#1e3a8a',
           fontSize: 12,
           fontFamily: 'monospace',
           marginBottom: 12,
         }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#1366E2', display: 'inline-block' }} />
           {sessionId}
         </div>
       )}
@@ -475,7 +475,7 @@ export default function PlaygroundText() {
                 padding: '8px 14px',
                 borderRadius: 6,
                 border: 'none',
-                background: 'var(--primary, #1D9E75)',
+                background: 'var(--primary, #0E50BD)',
                 color: 'white',
                 fontWeight: 600,
                 fontSize: 13,

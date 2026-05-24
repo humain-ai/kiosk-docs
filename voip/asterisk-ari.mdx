@@ -1,7 +1,7 @@
 ---
 title: "Asterisk ARI integration"
 description: "Control Asterisk calls programmatically with the REST Interface and bridge them to Humain Kiosk sessions."
-icon: "code"
+icon: "circle-asterisk"
 ---
 
 import VoipCredentialNote from '/snippets/voip-credential-note.mdx';
@@ -195,7 +195,7 @@ asterisk -rx "dialplan reload"
 
 ```bash
 # Set credentials as environment variables
-export HUMAIN_CREDENTIAL="hk_live_YOUR_TOKEN"
+export HUMAIN_CREDENTIAL="hk_live_your_credential_here"
 export ARI_PASSWORD="your_ari_password"
 
 node humain-ari.js
@@ -203,7 +203,7 @@ node humain-ari.js
 
 You should see:
 
-```
+```text
 Connected to Asterisk ARI — registering app "humain-kiosk"
 Stasis app "humain-kiosk" started — waiting for calls
 ```

@@ -6,7 +6,7 @@ description: "Receive AI response tokens as they are generated. Eliminates the w
 ## Why streaming?
 
 With the REST endpoint, the device waits for the full AI response before it arrives. With WebSocket
-streaming, the device receives each token as soon as it is generated — typically within 300 ms of
+streaming, the device receives response chunks as they are generated — typically within 300 ms of
 sending input. For a chat interface, this is the difference between a loading spinner and words
 appearing instantly on screen.
 
@@ -25,35 +25,55 @@ Send a UTF-8 JSON text frame:
 {"input": "What are your opening hours?"}
 ```
 
-### Receiving tokens
+### Receiving events
 
-The server sends a series of `token` frames followed by a single `done` frame:
+The server sends a sequence of typed frames for each AI turn:
 
 ```json
-{"type": "token", "token": "We "}
-{"type": "token", "token": "are "}
-{"type": "token", "token": "open "}
-{"type": "token", "token": "Monday "}
-{"type": "token", "token": "to "}
-{"type": "token", "token": "Friday, "}
-{"type": "token", "token": "9 AM–6 PM."}
-{"type": "done", "actions_called": []}
+{"type": "turn_start"}
+{"type": "chunk", "content": "We "}
+{"type": "chunk", "content": "are "}
+{"type": "chunk", "content": "open Monday to Friday, 9 AM–6 PM."}
+{"type": "turn_end", "message_count": 2}
 ```
 
-Concatenate `token` fields from all `token` frames to reconstruct the full response.
+If the AI calls an action endpoint during the turn, two additional frames appear mid-stream:
+
+```json
+{"type": "turn_start"}
+{"type": "tool_call", "name": "fetch_availability", "call_id": "call_abc123"}
+{"type": "tool_result", "call_id": "call_abc123", "status": "ok"}
+{"type": "chunk", "content": "We have slots available on Thursday."}
+{"type": "turn_end", "message_count": 3}
+```
+
+Concatenate `content` fields from all `chunk` frames to reconstruct the full response.
 
 ### Frame types
 
 <ResponseField name="type" type="string" required>
-  One of `token` or `done`.
+  One of `turn_start`, `chunk`, `tool_call`, `tool_result`, or `turn_end`.
 </ResponseField>
 
-<ResponseField name="token" type="string">
-  Present only when `type` is `token`. A fragment of the AI response — typically 1–5 words.
+<ResponseField name="content" type="string">
+  Present only when `type` is `chunk`. A fragment of the AI response — append to your output
+  buffer.
 </ResponseField>
 
-<ResponseField name="actions_called" type="string[]">
-  Present only when `type` is `done`. Names of action endpoints called during this turn.
+<ResponseField name="name" type="string">
+  Present only when `type` is `tool_call`. The name of the action endpoint that was invoked.
+</ResponseField>
+
+<ResponseField name="call_id" type="string">
+  Present on `tool_call` and `tool_result` frames. Links the result back to its originating call.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Present only when `type` is `tool_result`. Either `"ok"` or `"error"`.
+</ResponseField>
+
+<ResponseField name="message_count" type="integer">
+  Present only when `type` is `turn_end`. Total number of messages in the session after this turn.
 </ResponseField>
 
 ### Error frames
@@ -73,7 +93,7 @@ If the guardrail rejects input or a provider error occurs, the server sends a cl
 <CodeGroup>
 ```javascript JavaScript (browser)
 const BASE_URL = 'wss://api.humain.ai'; // wss:// for production, ws:// for local
-const token = 'hk_live_YOUR_TOKEN';
+const token = 'hk_live_your_credential_here';
 
 // 1. Open a session first (HTTP POST)
 const { session_id } = await fetch(`https://api.humain.ai/v1/sessions`, {
@@ -97,13 +117,13 @@ ws.onopen = () => {
 ws.onmessage = (event) => {
   const frame = JSON.parse(event.data);
 
-  if (frame.type === 'token') {
-    fullResponse += frame.token;
+  if (frame.type === 'chunk') {
+    fullResponse += frame.content;
     updateChatUI(fullResponse); // Append token to the visible text
   }
 
-  if (frame.type === 'done') {
-    console.log('Turn complete. Actions called:', frame.actions_called);
+  if (frame.type === 'turn_end') {
+    console.log('Turn complete. Messages in session:', frame.message_count);
     // Ready for next user input
   }
 };
@@ -142,12 +162,12 @@ ws.on('open', () => {
 let output = '';
 ws.on('message', (data) => {
   const frame = JSON.parse(data.toString());
-  if (frame.type === 'token') {
-    process.stdout.write(frame.token); // Stream to terminal
-    output += frame.token;
+  if (frame.type === 'chunk') {
+    process.stdout.write(frame.content); // Stream to terminal
+    output += frame.content;
   }
-  if (frame.type === 'done') {
-    console.log('\n\nDone. Actions:', frame.actions_called);
+  if (frame.type === 'turn_end') {
+    console.log('\n\nDone. Messages in session:', frame.message_count);
     ws.close();
   }
 });
@@ -209,5 +229,5 @@ class HumainStream {
 
 <Note>
   When reconnecting mid-session, the server still has the conversation history — you do not need
-  to resend previous messages. Just send the next user input.
+  to resend previous messages. Send the next user input directly.
 </Note>

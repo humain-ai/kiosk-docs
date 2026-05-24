@@ -179,7 +179,7 @@ Error types:
 ## Multi-turn conversation
 
 Conversation history is managed server-side. You do not pass previous messages with each
-request — just send the next user input.
+request — send the next user input directly.
 
 ```python
 async def conversation_loop(client: KioskClient):

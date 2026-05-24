@@ -18,8 +18,8 @@ Set these variables on any ancestor element (or `:root`) to override the widget'
   <Tab title="Light mode">
     | Variable | Default | Description |
     |---|---|---|
-    | `--hk-primary` | `#1D9E75` | Accent colour — FAB, send button, user message bubbles |
-    | `--hk-primary-hover` | `#12614a` | Hover state of primary elements |
+    | `--hk-primary` | `#0E50BD` | Accent colour — FAB, send button, user message bubbles |
+    | `--hk-primary-hover` | `#0a3d8f` | Hover state of primary elements |
     | `--hk-bg` | `#ffffff` | Widget panel background |
     | `--hk-surface` | `#f9fafb` | Input and header background |
     | `--hk-border` | `#e5e7eb` | Borders and dividers |
@@ -42,8 +42,8 @@ Set these variables on any ancestor element (or `:root`) to override the widget'
 
     | Variable | Recommended dark value | Description |
     |---|---|---|
-    | `--hk-primary` | `#4fc49a` | Lighter green for dark backgrounds |
-    | `--hk-primary-hover` | `#1D9E75` | |
+    | `--hk-primary` | `#9DC2FB` | Lighter blue for dark backgrounds |
+    | `--hk-primary-hover` | `#1366E2` | |
     | `--hk-bg` | `#18181b` | Widget panel background |
     | `--hk-surface` | `#27272a` | Input and header background |
     | `--hk-border` | `#3f3f46` | Borders |
@@ -194,6 +194,6 @@ export function Chat() {
 | `MessageBubble` | `role`, `content`, `streaming` | Each message in the history list |
 | `Header` | `title`, `onClose` | The coloured header bar |
 | `InputArea` | `value`, `onChange`, `onSubmit`, `disabled` | The input field and send button row |
-| `SendButton` | `disabled`, `onClick` | Just the send button |
+| `SendButton` | `disabled`, `onClick` | The send button only, without the input field |
 | `TypingIndicator` | — | The `…` animation while waiting for the first token |
 | `EmptyState` | — | The content shown before the first message |

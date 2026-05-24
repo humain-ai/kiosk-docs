@@ -64,7 +64,7 @@ credential step.
     **Test session opening independently:**
     ```bash
     curl -X POST https://api.humain.ai/v1/sessions \
-      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+      -H "Authorization: Bearer hk_live_your_credential_here" \
       -H "Content-Type: application/json" \
       -d '{"mode":"voip"}' \
       | jq .

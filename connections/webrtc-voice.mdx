@@ -50,7 +50,7 @@ sequenceDiagram
 ## Browser integration
 
 ```javascript
-const TOKEN = 'hk_live_YOUR_TOKEN';
+const TOKEN = 'hk_live_your_credential_here';
 const BASE  = 'https://api.humain.ai';
 
 async function startVoiceSession() {
@@ -145,7 +145,7 @@ You do not need to manage push-to-talk. The server detects end-of-utterance serv
 ## Advanced topics
 
 <AccordionGroup>
-  <Accordion title="TURN server configuration">
+  <Accordion title="Using TURN servers">
     In NAT-heavy environments (cellular networks, corporate firewalls) STUN alone may not
     establish a peer connection. Configure a TURN relay:
 

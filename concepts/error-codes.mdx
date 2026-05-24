@@ -32,20 +32,39 @@ Every error response uses the same JSON envelope:
 
 ## Error codes reference
 
-| HTTP | Code | When it occurs |
-|---|---|---|
-| 400 | `INPUT_REJECTED` | Guardrail rule or FraudGuard blocked the user's input |
-| 400 | `SESSION_ENDED` | Session already closed or time limit reached |
-| 401 | `UNAUTHENTICATED` | Missing, malformed, or revoked device token |
-| 402 | `PLAN_LIMIT_REACHED` | Workspace has hit its plan's session or message ceiling |
-| 403 | `KIOSK_INACTIVE` | The kiosk's status in the admin panel is not *active* |
-| 403 | `CREDENTIAL_BLOCKED` | FraudGuard blocked this credential due to suspicious activity |
-| 422 | `VALIDATION_ERROR` | Request body failed schema validation |
-| 429 | `RATE_LIMITED` | Too many requests — back off and retry |
-| 500 | `INTERNAL_ERROR` | Unexpected server error |
-| 503 | `PROVIDER_ERROR` | LLM, STT, or TTS provider is temporarily unavailable |
+| HTTP | Code | When it occurs | What to do |
+|---|---|---|---|
+| 400 | `INPUT_REJECTED` | Guardrail rule or FraudGuard blocked the user's input | Show a neutral message; do not retry |
+| 400 | `SESSION_ENDED` | Session already closed or time limit reached | Open a new session |
+| 401 | `UNAUTHENTICATED` | Missing, malformed, or revoked device token | Check credential format and expiry |
+| 402 | `PLAN_LIMIT_REACHED` | Workspace has hit its plan's session or message ceiling | Upgrade plan or reduce usage |
+| 403 | `KIOSK_INACTIVE` | The kiosk's status in the admin panel is not *active* | Activate the kiosk in the admin panel |
+| 403 | `CREDENTIAL_BLOCKED` | FraudGuard blocked this credential due to suspicious activity | Wait until `blocked_until`; contact support if incorrect |
+| 422 | `VALIDATION_ERROR` | Request body failed schema validation | Fix the request body per `details` field |
+| 429 | `RATE_LIMITED` | Too many requests — back off and retry | Wait `retry_after_seconds` before retrying |
+| 500 | `INTERNAL_ERROR` | Unexpected server error | Retry with exponential back-off; contact support if persistent |
+| 503 | `PROVIDER_ERROR` | LLM, STT, or TTS provider is temporarily unavailable | Retry with exponential back-off (1 s, 2 s, 4 s) |
 
 ## Codes with structured details
+
+### `CREDENTIAL_BLOCKED` — 403
+
+FraudGuard blocked this credential due to suspicious activity. The `details` object includes a
+`blocked_until` timestamp indicating when the block automatically expires.
+
+```json
+{
+  "error": "CREDENTIAL_BLOCKED",
+  "message": "This credential has been blocked due to suspicious activity.",
+  "details": {
+    "blocked_until": "2026-05-24T15:30:00Z",
+    "reason": "Excessive rate-limit violations"
+  }
+}
+```
+
+Do not retry until after `blocked_until`. If the block appears incorrectly applied, contact
+[support@humain.ai](mailto:support@humain.ai) with the credential label.
 
 ### `INPUT_REJECTED` — 400
 
