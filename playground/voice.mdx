@@ -1,0 +1,15 @@
+---
+title: "Voice playground"
+description: "Start a real WebRTC voice session with your kiosk. Speak into your microphone and hear the AI respond."
+mode: "wide"
+---
+
+import PlaygroundVoice from '/snippets/playground-voice.jsx';
+
+<Warning>
+  This playground establishes a **real WebRTC session** using your device credential. Your
+  microphone audio is streamed to the Humain servers. Use a sandbox credential to avoid
+  production billing. Browser microphone permission is required.
+</Warning>
+
+<PlaygroundVoice />

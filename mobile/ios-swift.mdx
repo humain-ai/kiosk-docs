@@ -1,0 +1,342 @@
+---
+title: "iOS"
+sidebarTitle: "iOS (Swift)"
+description: "Integrate Humain Kiosk into an iOS app — text chat, streaming, and real-time voice with SwiftUI."
+icon: "smartphone"
+---
+
+import SdkSandboxNote from '/snippets/sdk-sandbox-note.mdx';
+import SdkCredentialEnv from '/snippets/sdk-credential-env.mdx';
+
+The iOS SDK provides native Swift async/await APIs for text sessions and a full WebRTC voice
+pipeline with `AVAudioSession` integration. The underlying WebRTC protocol is described in the
+[WebRTC connection guide](/connections/webrtc-voice) — this page covers the iOS-specific
+implementation.
+
+<SdkSandboxNote />
+
+---
+
+## Install
+
+<Steps>
+  <Step title="Add the Swift package">
+    In Xcode, open your project and select **File → Add Package Dependencies**.
+
+    Enter the repository URL:
+    ```
+    https://github.com/humain-ai/kiosk-swift
+    ```
+
+    Select **Up to Next Major Version** from `1.0.0` and click **Add Package**.
+
+    <Accordion title="Screenshot — Swift Package Manager dialog">
+      {/* TODO: add screenshot of the Xcode Add Package Dependencies sheet */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Xcode → File → Add Package Dependencies → kiosk-swift
+        </div>
+      </Frame>
+    </Accordion>
+  </Step>
+
+  <Step title="Add the package to your target">
+    In the package selection dialog, check the box next to your app target, then click
+    **Add Package**.
+  </Step>
+
+  <Step title="Add the microphone usage description">
+    Open `Info.plist` (or your target's **Info** tab in Xcode) and add:
+
+    ```xml
+    <key>NSMicrophoneUsageDescription</key>
+    <string>This app uses your microphone to talk with the AI assistant.</string>
+    ```
+
+    This key is **required** for voice sessions. The app will crash on launch without it.
+  </Step>
+</Steps>
+
+---
+
+## Text and streaming
+
+<Tabs>
+  <Tab title="Text session">
+    Each `openSession()` call creates an independent conversation on the server. Use `defer`
+    to ensure the session is always closed.
+
+    ```swift
+    import HumainKiosk
+    import SwiftUI
+
+    class ChatViewModel: ObservableObject {
+        private let kiosk = KioskClient(credential: "hk_live_your_credential_here")
+
+        @Published var response: String = ""
+        @Published var isLoading: Bool = false
+
+        func sendMessage(_ text: String) async {
+            isLoading = true
+            defer { isLoading = false }
+
+            do {
+                let session = try await kiosk.openSession()
+                defer { Task { try? await session.close() } }
+
+                let result = try await session.sendMessage(text)
+                await MainActor.run { self.response = result.text }
+            } catch {
+                await MainActor.run { self.response = "Error: \(error.localizedDescription)" }
+            }
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="Streaming">
+    `session.stream()` returns an `AsyncThrowingStream<StreamEvent, Error>`. Use `for try await`
+    to consume tokens as they arrive.
+
+    ```swift
+    import HumainKiosk
+    import SwiftUI
+
+    class ChatViewModel: ObservableObject {
+        private let kiosk = KioskClient(credential: "hk_live_your_credential_here")
+
+        @Published var streamedText: String = ""
+
+        func streamMessage(_ text: String) async {
+            do {
+                let session = try await kiosk.openSession()
+                defer { Task { try? await session.close() } }
+
+                var accumulated = ""
+                for try await event in session.stream(text) {
+                    if case .chunk(let content) = event {
+                        accumulated += content
+                        await MainActor.run { self.streamedText = accumulated }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.streamedText = "Error: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    ```
+
+    Stream events:
+
+    | Case | Associated value | Description |
+    |---|---|---|
+    | `.turnStart` | — | AI has started generating |
+    | `.chunk(String)` | token fragment | Append to output buffer |
+    | `.toolCall(name:callId:)` | names | Action endpoint invoked |
+    | `.toolResult(callId:status:)` | status | Action returned |
+    | `.turnEnd(messageCount:)` | count | Generation complete |
+  </Tab>
+</Tabs>
+
+---
+
+## Voice session
+
+<Info>
+  The SDK requests microphone permission automatically on the first `openVoiceSession()` call.
+  The `NSMicrophoneUsageDescription` key in `Info.plist` **must** be set or the app will crash
+  before showing the permission prompt.
+</Info>
+
+```swift
+import HumainKiosk
+import AVFoundation
+import SwiftUI
+
+@MainActor
+class VoiceViewModel: NSObject, ObservableObject, KioskVoiceSessionDelegate {
+    private let kiosk = KioskClient(credential: "hk_live_your_credential_here")
+    private var voiceSession: VoiceSession?
+
+    @Published var status: VoiceStatus = .idle
+    @Published var transcript: String = ""
+    @Published var lastResponse: String = ""
+
+    func startSession() async throws {
+        // Configure AVAudioSession for VoIP-quality audio
+        let audioSession = AVAudioSession.sharedInstance()
+        try audioSession.setCategory(
+            .playAndRecord,
+            mode: .voiceChat,
+            options: [.defaultToSpeaker, .allowBluetooth]
+        )
+        try audioSession.setActive(true)
+
+        // Register for interruption and route-change notifications
+        registerAudioSessionObservers()
+
+        voiceSession = try await kiosk.openVoiceSession(delegate: self)
+        try await voiceSession?.start()
+    }
+
+    func stopSession() async throws {
+        try await voiceSession?.stop()
+        voiceSession = nil
+        removeAudioSessionObservers()
+        try AVAudioSession.sharedInstance().setActive(
+            false,
+            options: .notifyOthersOnDeactivation
+        )
+        status = .idle
+    }
+
+    // MARK: — KioskVoiceSessionDelegate
+
+    func session(_ session: VoiceSession, didTranscribe text: String) {
+        transcript = "You: \(text)"
+    }
+
+    func session(_ session: VoiceSession, didReceiveResponse text: String) {
+        lastResponse = text
+    }
+
+    func session(_ session: VoiceSession, didChangeStatus newStatus: VoiceStatus) {
+        status = newStatus
+    }
+
+    func session(_ session: VoiceSession, didFailWith error: KioskError) {
+        print("Voice session error: \(error)")
+        status = .idle
+    }
+}
+```
+
+---
+
+### Handling interruptions (phone calls)
+
+<Accordion title="Pause the voice session when a call or alarm interrupts">
+  Observe `AVAudioSession.interruptionNotification` and pause/resume the session accordingly.
+
+  ```swift
+  // MARK: — AVAudioSession notification observers
+
+  private func registerAudioSessionObservers() {
+      NotificationCenter.default.addObserver(
+          self,
+          selector: #selector(handleInterruption),
+          name: AVAudioSession.interruptionNotification,
+          object: AVAudioSession.sharedInstance()
+      )
+      NotificationCenter.default.addObserver(
+          self,
+          selector: #selector(handleRouteChange),
+          name: AVAudioSession.routeChangeNotification,
+          object: AVAudioSession.sharedInstance()
+      )
+  }
+
+  private func removeAudioSessionObservers() {
+      NotificationCenter.default.removeObserver(
+          self,
+          name: AVAudioSession.interruptionNotification,
+          object: nil
+      )
+      NotificationCenter.default.removeObserver(
+          self,
+          name: AVAudioSession.routeChangeNotification,
+          object: nil
+      )
+  }
+
+  @objc private func handleInterruption(_ notification: Notification) {
+      guard let info = notification.userInfo,
+            let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+            let type = AVAudioSession.InterruptionType(rawValue: typeValue)
+      else { return }
+
+      switch type {
+      case .began:
+          // Phone call, Siri, or alarm started — mute our session
+          voiceSession?.isMuted = true
+
+      case .ended:
+          guard let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+          let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+          if options.contains(.shouldResume) {
+              // Reactivate and unmute
+              try? AVAudioSession.sharedInstance().setActive(true)
+              voiceSession?.isMuted = false
+          }
+
+      @unknown default:
+          break
+      }
+  }
+  ```
+</Accordion>
+
+### Handling route changes (headphones)
+
+<Accordion title="Respond to audio route changes — headphone plug/unplug">
+  When the user unplugs headphones, iOS routes audio to the speaker, which can cause echo.
+  Pause the session briefly while the route stabilises.
+
+  ```swift
+  @objc private func handleRouteChange(_ notification: Notification) {
+      guard let info = notification.userInfo,
+            let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+            let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
+      else { return }
+
+      switch reason {
+      case .oldDeviceUnavailable:
+          // Headphones unplugged — mute briefly to prevent echo burst
+          voiceSession?.isMuted = true
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+              self?.voiceSession?.isMuted = false
+          }
+
+      case .newDeviceAvailable:
+          // New audio route (e.g., AirPods connected) — audio already routing correctly
+          break
+
+      default:
+          break
+      }
+  }
+  ```
+</Accordion>
+
+### Background audio
+
+<Accordion title="Keep voice sessions alive in the background">
+  By default, iOS suspends apps after they move to the background. To keep a voice session
+  running while the user is on another screen:
+
+  1. In Xcode, open your target's **Signing & Capabilities** tab.
+  2. Click **+ Capability** and add **Background Modes**.
+  3. Check **Audio, AirPlay, and Picture in Picture**.
+
+  This adds the following to your `Info.plist`:
+
+  ```xml
+  <key>UIBackgroundModes</key>
+  <array>
+      <string>audio</string>
+  </array>
+  ```
+
+  With this capability, the `AVAudioSession` remains active while the app is in the background
+  and the voice session continues uninterrupted.
+
+  <Warning>
+    Apple's App Store review guidelines require that background audio has a genuine user benefit.
+    Voice assistant apps qualify — background music players in disguise do not.
+  </Warning>
+</Accordion>
+
+---
+
+<SdkCredentialEnv />

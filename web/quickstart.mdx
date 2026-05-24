@@ -1,0 +1,122 @@
+---
+title: "Quickstart"
+description: "Add AI chat to your JavaScript app in under 5 minutes using the @humain/kiosk-js SDK."
+icon: "rocket"
+---
+
+import InstallJs from '/snippets/install-js.mdx';
+import SandboxTip from '/snippets/sandbox-tip.mdx';
+import CredentialWarning from '/snippets/credential-warning.mdx';
+
+The `@humain/kiosk-js` SDK wraps the Humain Device API so you can open sessions, send messages, and
+stream responses with one import and a handful of method calls — no raw HTTP required.
+
+<SandboxTip />
+
+<Steps>
+  <Step title="Install the package">
+    <InstallJs />
+  </Step>
+
+  <Step title="Open a session and send a message">
+    <CodeGroup>
+    ```typescript TypeScript
+    import { HumainKioskClient } from "@humain/kiosk-js"
+
+    const kiosk = new HumainKioskClient({
+      credential: "hk_live_your_credential_here",
+      mode: "sandbox", // switch to "live" for production
+    })
+
+    const session = await kiosk.openSession()
+    const { response } = await session.sendMessage("Hello, how can I help you today?")
+    console.log(response)
+    await session.close()
+    ```
+
+    ```javascript JavaScript
+    import { HumainKioskClient } from "@humain/kiosk-js"
+
+    const kiosk = new HumainKioskClient({
+      credential: "hk_live_your_credential_here",
+      mode: "sandbox",
+    })
+
+    const session = await kiosk.openSession()
+    const { response } = await session.sendMessage("Hello, how can I help you today?")
+    console.log(response)
+    await session.close()
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Add streaming">
+    Replace `sendMessage` with `session.stream()` to receive tokens as they are generated.
+    This uses an async iterator — `for await` works in any modern JavaScript runtime.
+
+    ```typescript
+    const session = await kiosk.openSession()
+
+    process.stdout.write("Assistant: ")
+    for await (const event of session.stream("What services do you offer?")) {
+      if (event.type === "chunk") {
+        process.stdout.write(event.content)
+      }
+    }
+    console.log() // newline after stream completes
+
+    await session.close()
+    ```
+
+    The iterator yields objects of these types:
+
+    | `type` | Extra fields | Description |
+    |---|---|---|
+    | `turn_start` | — | The AI has started generating |
+    | `chunk` | `content: string` | A token fragment — append to your UI |
+    | `tool_call` | `name`, `callId` | An action endpoint was invoked |
+    | `tool_result` | `callId`, `status` | Action endpoint returned |
+    | `turn_end` | `messageCount: number` | Generation complete |
+  </Step>
+
+  <Step title="Handle errors">
+    The client throws typed `KioskError` instances you can inspect:
+
+    ```typescript
+    import { HumainKioskClient, KioskError } from "@humain/kiosk-js"
+
+    try {
+      const { response } = await session.sendMessage(userInput)
+    } catch (err) {
+      if (err instanceof KioskError) {
+        switch (err.code) {
+          case "RATE_LIMITED":
+            await sleep(err.retryAfterSeconds * 1000)
+            break
+          case "INPUT_REJECTED":
+            showUserMessage("I can't help with that.")
+            break
+          default:
+            console.error(err.code, err.message)
+        }
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+<CredentialWarning />
+
+## What's next?
+
+<Columns cols={3}>
+  <Card title="Drop-in widget" icon="code" href="/web/drop-in-widget">
+    Add a floating chat button to any webpage with a single `<script>` tag — no build step.
+  </Card>
+  <Card title="React components" icon="atom" href="/web/react">
+    `<KioskChat>` and `useKioskSession` for React and Next.js applications.
+  </Card>
+  <Card title="Streaming UI patterns" icon="bolt" href="/web/streaming-ui">
+    Cursor animation, layout shift prevention, and abort/retry patterns.
+  </Card>
+</Columns>

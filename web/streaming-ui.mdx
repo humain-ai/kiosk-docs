@@ -1,0 +1,283 @@
+---
+title: "Streaming UI patterns"
+description: "Three production-ready patterns for streaming text: cursor animation, layout shift prevention, and abort/retry."
+icon: "bolt"
+---
+
+Streaming responses arrive as a sequence of text chunks. How you apply those chunks to your UI
+determines whether the experience feels fast and polished or jittery and broken. This guide covers
+the three patterns that matter most.
+
+---
+
+## Pattern 1 — Cursor animation
+
+Show a blinking cursor at the end of the in-progress text to signal that more is coming. Remove it
+immediately when `turn_end` fires.
+
+```css
+/* custom.css */
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+.streaming-cursor::after {
+  content: "▌";
+  display: inline-block;
+  animation: blink-cursor 0.7s step-end infinite;
+  color: currentColor;
+}
+```
+
+<CodeGroup>
+```tsx React
+import { useState } from "react"
+
+interface Props { content: string; streaming: boolean }
+
+function AssistantBubble({ content, streaming }: Props) {
+  return (
+    <div className={streaming ? "streaming-cursor" : ""}>
+      {content}
+    </div>
+  )
+}
+
+// In your sendMessage handler:
+function ChatView() {
+  const [messages, setMessages] = useState<{ content: string; streaming: boolean }[]>([])
+  const { session } = useKioskSession({ credential: "hk_live_…" })
+
+  async function send(input: string) {
+    setMessages(prev => [...prev, { content: "", streaming: true }])
+    let buf = ""
+    for await (const event of session!.stream(input)) {
+      if (event.type === "chunk") {
+        buf += event.content
+        setMessages(prev => [
+          ...prev.slice(0, -1),
+          { content: buf, streaming: true },
+        ])
+      }
+      if (event.type === "turn_end") {
+        setMessages(prev => [
+          ...prev.slice(0, -1),
+          { content: buf, streaming: false }, // remove cursor class
+        ])
+      }
+    }
+  }
+}
+```
+
+```vue Vue
+<script setup lang="ts">
+import { ref } from "vue"
+
+const messages = ref<Array<{ content: string; streaming: boolean }>>([])
+const { stream } = useKioskSession({ credential: "hk_live_…" })
+
+async function send(input: string) {
+  messages.value.push({ content: "", streaming: true })
+  let buf = ""
+  for await (const event of stream(input)) {
+    if (event.type === "chunk") {
+      buf += event.content
+      messages.value[messages.value.length - 1].content = buf
+    }
+    if (event.type === "turn_end") {
+      messages.value[messages.value.length - 1].streaming = false
+    }
+  }
+}
+</script>
+
+<template>
+  <div
+    v-for="(msg, i) in messages" :key="i"
+    :class="{ 'streaming-cursor': msg.streaming }"
+  >{{ msg.content }}</div>
+</template>
+```
+
+```javascript Vanilla JS
+async function send(session, input, container) {
+  const node = document.createElement("p")
+  node.classList.add("streaming-cursor")
+  container.appendChild(node)
+
+  let buf = ""
+  for await (const event of session.stream(input)) {
+    if (event.type === "chunk") {
+      buf += event.content
+      node.textContent = buf
+    }
+    if (event.type === "turn_end") {
+      node.classList.remove("streaming-cursor")
+    }
+  }
+}
+```
+</CodeGroup>
+
+---
+
+## Pattern 2 — Avoiding layout shift
+
+If the response container starts empty and expands as text arrives, surrounding elements jump
+around. Pre-allocate a minimum height, or use CSS to hold space before the first token lands.
+
+<CodeGroup>
+```tsx React
+function AssistantBubble({ content, streaming }: Props) {
+  return (
+    <div style={{
+      // Pre-allocate a minimum height so the container doesn't collapse before the first token
+      minHeight: streaming && !content ? "1.5em" : undefined,
+      // Prevent the container from collapsing entirely after streaming ends
+      minWidth: 40,
+    }}>
+      {content}
+      {streaming && <span className="streaming-cursor" aria-hidden />}
+    </div>
+  )
+}
+```
+
+```vue Vue
+<template>
+  <div
+    :style="{
+      minHeight: msg.streaming && !msg.content ? '1.5em' : undefined,
+      minWidth: '40px',
+    }"
+  >
+    {{ msg.content }}
+    <span v-if="msg.streaming" class="streaming-cursor" aria-hidden="true" />
+  </div>
+</template>
+```
+
+```javascript Vanilla JS
+// Create the node with reserved space before the first token
+const node = document.createElement("p")
+node.style.minHeight = "1.5em"
+node.style.minWidth = "40px"
+container.appendChild(node)
+
+for await (const event of session.stream(input)) {
+  if (event.type === "chunk") {
+    node.textContent += event.content
+    node.style.minHeight = "" // release reserved height once text starts flowing
+  }
+}
+```
+</CodeGroup>
+
+---
+
+## Pattern 3 — Abort and retry
+
+When the user wants to interrupt a response or send a corrected message while the AI is still
+generating, you need to cancel the in-flight stream. The SDK exposes an `AbortController`-compatible
+mechanism via `session.abort()`.
+
+<CodeGroup>
+```tsx React
+import { useRef } from "react"
+import { useKioskSession } from "@humain/kiosk-js/react"
+
+function ChatView() {
+  const { session } = useKioskSession({ credential: "hk_live_…" })
+  const streamingRef = useRef(false)
+
+  async function send(input: string) {
+    // If already streaming, abort the current stream first
+    if (streamingRef.current) {
+      session?.abort()
+    }
+
+    streamingRef.current = true
+    try {
+      for await (const event of session!.stream(input)) {
+        if (event.type === "chunk") { /* update UI */ }
+        if (event.type === "turn_end") { streamingRef.current = false }
+      }
+    } catch (err) {
+      if (err.code !== "ABORTED") throw err
+      // ABORTED is expected — the user sent a new message mid-stream
+    } finally {
+      streamingRef.current = false
+    }
+  }
+
+  return (
+    <button onClick={() => session?.abort()}>Stop generating</button>
+  )
+}
+```
+
+```vue Vue
+<script setup lang="ts">
+import { ref } from "vue"
+const { session, stream } = useKioskSession({ credential: "hk_live_…" })
+const isStreaming = ref(false)
+
+async function send(input: string) {
+  if (isStreaming.value) {
+    session.value?.abort()
+  }
+  isStreaming.value = true
+  try {
+    for await (const event of stream(input)) {
+      if (event.type === "chunk") { /* update UI */ }
+      if (event.type === "turn_end") isStreaming.value = false
+    }
+  } catch (err) {
+    if (err.code !== "ABORTED") throw err
+  } finally {
+    isStreaming.value = false
+  }
+}
+</script>
+```
+
+```javascript Vanilla JS
+let currentStream = null
+
+async function send(session, input, container) {
+  // Abort any in-flight stream
+  if (currentStream) {
+    session.abort()
+    currentStream = null
+  }
+
+  const node = document.createElement("p")
+  container.appendChild(node)
+
+  currentStream = session.stream(input)
+  try {
+    for await (const event of currentStream) {
+      if (event.type === "chunk") node.textContent += event.content
+    }
+  } catch (err) {
+    if (err.code !== "ABORTED") {
+      node.textContent = "Error: " + err.message
+    }
+  } finally {
+    currentStream = null
+  }
+}
+
+// Wire to a "Stop" button
+document.getElementById("stop-btn").addEventListener("click", () => {
+  if (currentStream) session.abort()
+})
+```
+</CodeGroup>
+
+<Note>
+  `session.abort()` cancels the current stream iterator without closing the session. The session
+  stays open — the next call to `session.stream()` or `session.sendMessage()` will work normally.
+</Note>

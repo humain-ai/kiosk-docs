@@ -1,0 +1,184 @@
+---
+title: "FreePBX module"
+sidebarTitle: "FreePBX"
+description: "Add Humain Kiosk AI to any FreePBX installation — no dialplan editing required."
+icon: "server"
+---
+
+<Note>
+  This page is for FreePBX administrators who want to route calls to the Humain AI without
+  writing dialplan code. If you are an Asterisk developer who prefers scripted control, see the
+  [Asterisk AGI integration](/voip/asterisk-agi) guide instead.
+</Note>
+
+The **Humain Kiosk** FreePBX module adds a new destination type — **Humain Kiosk AI** — to your
+FreePBX routing table. Once installed, you can route any inbound route, IVR option, or ring
+group timeout directly to the AI, just like routing to a queue or voicemail.
+
+---
+
+## Installation
+
+<Steps>
+  <Step title="Install the module">
+    In your FreePBX admin panel, go to **Admin → Module Admin**. Click **Check Online** to
+    refresh the module repository, then search for **"Humain Kiosk"**. Click **Download** and
+    then **Process**.
+
+    <Accordion title="Screenshot — installing from Module Admin">
+      {/* TODO: add screenshot of Module Admin showing Humain Kiosk in the module list */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Admin → Module Admin → Humain Kiosk → Download and Process
+        </div>
+      </Frame>
+    </Accordion>
+
+    Alternatively, download the `.tar.gz` from the
+    [FreePBX module page](https://www.freepbx.org/add-ons/add-on-modules/humain-kiosk/) and
+    upload it via **Module Admin → Upload**.
+
+    After installation, click **Apply Config** to reload Asterisk.
+  </Step>
+
+  <Step title="Enter your credential">
+    Go to **Admin → Humain Kiosk Settings**. Paste your device credential token into the
+    **Credential** field and click **Save**.
+
+    <Accordion title="Screenshot — entering your credential">
+      {/* TODO: add screenshot of Admin → Humain Kiosk Settings page with Credential field */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Admin → Humain Kiosk Settings → Credential field
+        </div>
+      </Frame>
+    </Accordion>
+
+    <Note>
+      Issue credentials from the Humain admin panel under **Kiosk → Credentials → Issue new
+      credential**. The token is displayed only once — copy it before closing that page.
+    </Note>
+  </Step>
+
+  <Step title="Configure the AI destination">
+    Go to **Connectivity → Humain Kiosk Destinations**. Click **Add Destination** and configure:
+
+    - **Name** — a label for this destination (e.g., "Main AI Agent")
+    - **Codec preference** — G.722 recommended; G.711 PCMU/PCMA for legacy carriers
+    - **Timeout** — maximum call duration in seconds (0 = unlimited)
+    - **Fallback destination** — where to route the call if the AI is unavailable
+
+    <Accordion title="Screenshot — adding a Humain Kiosk destination">
+      {/* TODO: add screenshot of Add Destination form */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Connectivity → Humain Kiosk Destinations → Add Destination form
+        </div>
+      </Frame>
+    </Accordion>
+
+    Click **Save**, then **Apply Config**.
+  </Step>
+
+  <Step title="Route calls to the AI">
+    With the destination created, route calls to it from anywhere in FreePBX:
+
+    <Tabs>
+      <Tab title="Inbound route">
+        Go to **Connectivity → Inbound Routes**. Edit the route for the DID number you want the
+        AI to answer. Set **Set Destination** to **Humain Kiosk → [your destination name]**.
+
+        <Accordion title="Screenshot — setting destination on an inbound route">
+          {/* TODO: add screenshot of Inbound Routes → Set Destination → Humain Kiosk */}
+          <Frame>
+            <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+              Screenshot: Inbound Routes → Set Destination → Humain Kiosk → Main AI Agent
+            </div>
+          </Frame>
+        </Accordion>
+      </Tab>
+      <Tab title="IVR option">
+        Go to **Applications → IVR** and edit your IVR menu. In the **IVR Entries** table, set
+        any digit option's destination to **Humain Kiosk → [your destination name]**. For
+        example, press `1` for the AI assistant.
+
+        <Accordion title="Screenshot — IVR option pointing to Humain Kiosk">
+          {/* TODO: add screenshot of IVR Entries table with Humain Kiosk destination */}
+          <Frame>
+            <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+              Screenshot: Applications → IVR → IVR Entries → digit 1 → Humain Kiosk
+            </div>
+          </Frame>
+        </Accordion>
+      </Tab>
+      <Tab title="Ring group timeout">
+        Go to **Applications → Ring Groups**. Set the **Destination if no answer** to
+        **Humain Kiosk → [your destination name]**. When no agent answers, the caller is
+        transferred to the AI.
+
+        <Accordion title="Screenshot — ring group timeout to Humain Kiosk">
+          {/* TODO: add screenshot of Ring Group → Destination if no answer → Humain Kiosk */}
+          <Frame>
+            <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+              Screenshot: Ring Groups → Destination if no answer → Humain Kiosk
+            </div>
+          </Frame>
+        </Accordion>
+      </Tab>
+    </Tabs>
+
+    Click **Save**, then **Apply Config**.
+  </Step>
+
+  <Step title="Test with sandbox mode">
+    Before going live, enable **Sandbox mode** in **Admin → Humain Kiosk Settings**. In sandbox
+    mode, the AI uses stub responses — no LLM credits are consumed.
+
+    Dial the DID number or trigger the IVR option. You should hear a predictable sandbox
+    response. Once satisfied, disable sandbox mode and apply config.
+
+    <Accordion title="Screenshot — sandbox mode toggle">
+      {/* TODO: add screenshot of Admin → Humain Kiosk Settings → Sandbox mode checkbox */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Admin → Humain Kiosk Settings → Sandbox mode toggle
+        </div>
+      </Frame>
+    </Accordion>
+  </Step>
+</Steps>
+
+---
+
+## Advanced settings
+
+<AccordionGroup>
+  <Accordion title="Passing caller ID to the AI session">
+    When enabled, the module passes the caller's CLI (Caller Line Identification) and the
+    dialled DID to the Humain session as metadata. Your kiosk's action endpoints can use this
+    to look up customer records.
+
+    Enable **Pass caller metadata** in **Admin → Humain Kiosk Settings → Advanced**. The
+    following fields are added to each session:
+
+    | Metadata key | Value |
+    |---|---|
+    | `caller_id` | Caller CLI (ANI) |
+    | `did` | Dialled number (DNIS) |
+    | `channel` | Asterisk channel name |
+  </Accordion>
+
+  <Accordion title="Codec configuration">
+    The module negotiates codecs with the Humain SIP gateway in this preference order:
+    G.722 → G.711 PCMU → G.711 PCMA.
+
+    To force a specific codec, change the **Codec preference** setting on each destination.
+    See the [codec guide](/voip/codec-guide) for quality recommendations.
+  </Accordion>
+
+  <Accordion title="Fallback on API error">
+    If the Humain API is unreachable when the call arrives, the module routes to the configured
+    **Fallback destination** instead of dropping the call. Set the fallback to a queue, voicemail,
+    or another extension in **Connectivity → Humain Kiosk Destinations**.
+  </Accordion>
+</AccordionGroup>

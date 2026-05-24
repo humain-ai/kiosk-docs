@@ -1,0 +1,134 @@
+/* ─── Voice button ─────────────────────────────────────────────────────────── */
+
+.hk-voice-btn {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: #1D9E75;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, transform 0.15s ease;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.hk-voice-btn:hover:not(:disabled) {
+  background: #12614a;
+  transform: scale(1.05);
+}
+
+.hk-voice-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.hk-voice-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.hk-voice-btn.listening {
+  animation: hk-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes hk-pulse {
+  0%   { box-shadow: 0 0 0 0   rgba(29, 158, 117, 0.45); }
+  60%  { box-shadow: 0 0 0 22px rgba(29, 158, 117, 0);    }
+  100% { box-shadow: 0 0 0 0   rgba(29, 158, 117, 0);    }
+}
+
+/* ─── Status indicator ─────────────────────────────────────────────────────── */
+
+.hk-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.hk-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d1d5db;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.hk-status-dot.connecting {
+  background: #f59e0b;
+  animation: hk-blink 1s step-end infinite;
+}
+
+.hk-status-dot.listening {
+  background: #10b981;
+}
+
+.hk-status-dot.speaking {
+  background: #6366f1;
+  animation: hk-blink 0.8s step-start infinite;
+}
+
+@keyframes hk-blink {
+  50% { opacity: 0; }
+}
+
+/* ─── Mode / environment toggle ────────────────────────────────────────────── */
+
+.hk-mode-toggle {
+  display: inline-flex;
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.dark .hk-mode-toggle {
+  background: #27272a;
+}
+
+.hk-mode-toggle button {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.dark .hk-mode-toggle button {
+  color: #a1a1aa;
+}
+
+.hk-mode-toggle button:hover:not(:disabled) {
+  color: #111827;
+}
+
+.dark .hk-mode-toggle button:hover:not(:disabled) {
+  color: #fafafa;
+}
+
+.hk-mode-toggle button.active {
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.dark .hk-mode-toggle button.active {
+  background: #3f3f46;
+  color: #fafafa;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.hk-mode-toggle button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

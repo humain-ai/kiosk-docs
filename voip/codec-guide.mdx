@@ -1,0 +1,125 @@
+---
+title: "Codec guide"
+description: "Codec compatibility, quality trade-offs, and configuration recommendations for Humain Kiosk VoIP sessions."
+icon: "sliders"
+---
+
+The Humain SIP gateway accepts audio in several codecs and transcodes internally to Opus before
+passing audio to the AI pipeline. Codec choice affects transcription accuracy, bandwidth usage,
+and compatibility with your PBX or telephony provider.
+
+---
+
+## Compatibility matrix
+
+| Codec | Humain support | Sample rate | Bandwidth | Notes |
+|---|---|---|---|---|
+| G.711 μ-law (PCMU) | ✅ Supported | 8 kHz | ~64 kbps | Universal — works with every PBX and carrier |
+| G.711 A-law (PCMA) | ✅ Supported | 8 kHz | ~64 kbps | European variant of G.711 |
+| G.722 | ✅ Supported | 16 kHz | ~64 kbps | Wideband — significantly better STT accuracy |
+| Opus | ✅ Supported | 8–48 kHz | 6–510 kbps | Best quality; requires modern SIP stack |
+| G.729 | ❌ Not supported | 8 kHz | ~8 kbps | Patent-encumbered; not decoded by gateway |
+| G.726 | ❌ Not supported | 8 kHz | ~16–40 kbps | ADPCM variant; not decoded by gateway |
+| iLBC | ❌ Not supported | 8 kHz | ~15 kbps | Not decoded by gateway |
+
+---
+
+## Which codec should I use?
+
+<AccordionGroup>
+  <Accordion title="Use G.722 if your PBX supports it (recommended for most deployments)">
+    G.722 (wideband) doubles the audio bandwidth compared to G.711 narrowband. Deepgram's
+    speech-to-text model performs measurably better at 16 kHz, especially for:
+
+    - Non-native English speakers
+    - Noisy environments (call centres, drive-throughs)
+    - Short commands or proper nouns
+
+    G.722 uses the same ~64 kbps bandwidth as G.711, so there is no cost to enabling it.
+    Most modern IP phones, Asterisk/FreeSWITCH, and 3CX support G.722 out of the box.
+
+    **Asterisk PJSIP config:**
+    ```ini
+    [humain-endpoint]
+    ; Prefer G.722, fall back to PCMU/PCMA
+    allow=!all,g722,ulaw,alaw
+    ```
+  </Accordion>
+
+  <Accordion title="Use Opus for the best quality (WebRTC-native, variable bitrate)">
+    Opus is the native codec for WebRTC and operates at up to 48 kHz stereo. It supports
+    variable bitrate, making it efficient on constrained links while delivering high quality
+    when bandwidth is available.
+
+    Use Opus when:
+    - Your PBX or SIP stack supports it (FreeSWITCH, Kamailio, recent Asterisk builds)
+    - You are using a WebRTC-to-SIP gateway
+    - You want the lowest possible word-error rate from Deepgram
+
+    **Note:** Opus requires the `opus` codec module in Asterisk (`codec_opus`). This module
+    is not bundled with Asterisk and must be installed separately from Digium or Sangoma.
+  </Accordion>
+
+  <Accordion title="Use G.711 for maximum compatibility">
+    G.711 PCMU (μ-law, North America) and PCMA (A-law, Europe/Rest of World) are supported
+    by every SIP device made in the last 30 years. Use G.711 when:
+
+    - You are unsure what codecs your carrier or PBX supports
+    - You are connecting legacy ATAs or analogue gateways
+    - You are troubleshooting — G.711 eliminates codec negotiation as a variable
+
+    The STT accuracy impact of G.711 is acceptable for clear, quiet audio. In noisy environments
+    or with accented speech, consider switching to G.722 if your PBX supports it.
+  </Accordion>
+
+  <Accordion title="G.729 — why it is not supported">
+    G.729 is a low-bitrate (~8 kbps) narrowband codec that requires a licensed decoder. The
+    Humain gateway does not include a G.729 license. If your carrier sends G.729, you must
+    transcode it to G.711 or G.722 at your PBX before routing to Humain.
+
+    **Asterisk transcode config:**
+    ```ini
+    ; Transcode G.729 to G.711 at the PBX before sending to Humain
+    [outbound-to-humain]
+    allow=!all,ulaw,alaw,g722  ; Do NOT include g729 here
+    ```
+
+    FreeSWITCH and most hosted PBXes can transcode G.729 to G.711 transparently.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## SDP negotiation
+
+The Humain gateway advertises codecs in this preference order in its SDP `m=audio` line:
+
+```
+m=audio 10000 RTP/SAVP 9 0 8 111
+a=rtpmap:9   G722/8000
+a=rtpmap:0   PCMU/8000
+a=rtpmap:8   PCMA/8000
+a=rtpmap:111 opus/48000/2
+a=fmtp:111   minptime=10;useinbandfec=1
+```
+
+Your PBX will select the first mutually supported codec from this list. If you want to force
+a specific codec, configure your PBX endpoint to offer only that codec.
+
+---
+
+## DTMF
+
+The gateway accepts DTMF via **RFC 2833 / RFC 4733** (telephone-event payload type 101). In-band
+DTMF (audio tones) is not detected — configure your PBX to use out-of-band DTMF.
+
+**Asterisk:**
+```ini
+[humain-endpoint]
+dtmf_mode=rfc4733
+```
+
+**FreeSWITCH:**
+```xml
+<param name="dtmf-type" value="rfc2833"/>
+```

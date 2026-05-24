@@ -1,0 +1,149 @@
+---
+title: "Drop-in widget"
+description: "Add a floating chat widget to any webpage with a single script tag. No build step, no framework required."
+icon: "code"
+---
+
+import WidgetPreview from '/snippets/widget-preview.jsx';
+import CredentialWarning from '/snippets/credential-warning.mdx';
+import SandboxTip from '/snippets/sandbox-tip.mdx';
+
+<WidgetPreview />
+
+The drop-in widget is a self-contained script that injects a floating chat button into any webpage.
+Click the preview above to see exactly what your users will see before reading a line of code.
+
+## Installation
+
+Paste these two tags before `</body>` in your HTML:
+
+```html
+<script src="https://cdn.humain.ai/widget.js"></script>
+<script>
+  HumainWidget.init({
+    credential: "hk_live_your_credential_here",
+    position: "bottom-right",
+    theme: "auto",
+  })
+</script>
+```
+
+That's it. The widget loads asynchronously and does not block your page render.
+
+<SandboxTip />
+<CredentialWarning />
+
+## Configuration options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `credential` | `string` | **required** | Your device credential token (`hk_live_…`) |
+| `mode` | `"sandbox"` \| `"live"` | `"live"` | Environment — use `"sandbox"` during development |
+| `position` | `"bottom-right"` \| `"bottom-left"` | `"bottom-right"` | Corner where the widget appears |
+| `theme` | `"light"` \| `"dark"` \| `"auto"` | `"auto"` | Colour scheme — `"auto"` follows the OS preference |
+| `primaryColor` | `string` | `"#1D9E75"` | Accent colour used for the FAB and message bubbles (hex) |
+| `title` | `string` | `"Kiosk"` | Text shown in the widget header |
+| `placeholder` | `string` | `"Type a message…"` | Input field placeholder text |
+| `initialMessage` | `string` | — | Message displayed automatically when the widget first opens |
+| `zIndex` | `number` | `9999` | CSS `z-index` of the widget — increase if other elements overlap it |
+
+## Programmatic control
+
+Use the `HumainWidget` object to open, close, or destroy the widget from your own code:
+
+```javascript
+// Open the chat window (e.g. from your own CTA button)
+HumainWidget.open()
+
+// Close the chat window
+HumainWidget.close()
+
+// Remove the widget and all its DOM elements entirely
+HumainWidget.destroy()
+```
+
+```javascript
+// Example: open the widget when the user clicks a custom button
+document.getElementById("chat-btn").addEventListener("click", () => {
+  HumainWidget.open()
+})
+```
+
+## Event callbacks
+
+Pass callbacks to `HumainWidget.init()` to react to user interactions:
+
+```javascript
+HumainWidget.init({
+  credential: "hk_live_your_credential_here",
+  onOpen:    () => analytics.track("widget_opened"),
+  onClose:   () => analytics.track("widget_closed"),
+  onMessage: (msg)  => console.log("User said:", msg),
+  onResponse:(resp) => console.log("AI replied:", resp),
+})
+```
+
+| Callback | Signature | When it fires |
+|---|---|---|
+| `onOpen` | `() => void` | User opens the chat window |
+| `onClose` | `() => void` | User closes the chat window |
+| `onMessage` | `(message: string) => void` | User sends a message |
+| `onResponse` | `(response: string) => void` | AI response is fully received |
+
+## Advanced topics
+
+<AccordionGroup>
+  <Accordion title="Content Security Policy">
+    If your site uses a `Content-Security-Policy` header, add the following directives to allow
+    the widget to load and communicate:
+
+    ```http
+    Content-Security-Policy:
+      script-src 'self' https://cdn.humain.ai;
+      connect-src 'self' https://api.humain.ai https://sandbox.api.humain.ai wss://api.humain.ai;
+      frame-src 'none';
+    ```
+
+    The widget does not use iframes or inline `eval()`. If you use a strict `script-src` policy,
+    you may need to add a nonce or hash for the inline `<script>` that calls `HumainWidget.init()`.
+  </Accordion>
+  <Accordion title="Loading the script asynchronously">
+    For maximum page performance, load the widget script asynchronously and defer initialisation
+    until after the page is interactive:
+
+    ```html
+    <script>
+      window.addEventListener("DOMContentLoaded", function () {
+        var s = document.createElement("script")
+        s.src = "https://cdn.humain.ai/widget.js"
+        s.onload = function () {
+          HumainWidget.init({
+            credential: "hk_live_your_credential_here",
+          })
+        }
+        document.head.appendChild(s)
+      })
+    </script>
+    ```
+  </Accordion>
+  <Accordion title="Multiple kiosks on one page">
+    You can render multiple independent widget instances with different credentials (e.g. one for
+    support and one for sales). Use `HumainWidget.create()` instead of `HumainWidget.init()`:
+
+    ```javascript
+    const supportWidget = HumainWidget.create({
+      credential: "hk_live_SUPPORT_TOKEN",
+      position: "bottom-right",
+      title: "Support",
+    })
+
+    const salesWidget = HumainWidget.create({
+      credential: "hk_live_SALES_TOKEN",
+      position: "bottom-left",
+      title: "Sales",
+    })
+    ```
+
+    Each instance is independent and can be controlled separately via the returned object.
+  </Accordion>
+</AccordionGroup>

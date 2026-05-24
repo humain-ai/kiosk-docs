@@ -1,0 +1,191 @@
+---
+title: "OTA updates"
+description: "Keeping the kiosk library and firmware up to date — SWUpdate, Mender, and Balena Cloud, with credential preservation across updates."
+icon: "upload"
+---
+
+Deployed kiosk devices need a way to receive library updates, bug fixes, and firmware patches
+without physical access. This page covers the three most common OTA delivery tools for embedded
+Linux, and how to preserve credentials across updates.
+
+---
+
+## Update mechanisms
+
+| Tool | Best for | Approach |
+|---|---|---|
+| **SWUpdate** | Single-board Linux, factory images | Image-based A/B update via RAUC or `swupdate` |
+| **Mender** | Raspberry Pi, Yocto builds | Hosted or self-hosted OTA server, A/B partition update |
+| **Balena Cloud** | Docker-based embedded apps | Container fleet management, rolling deploys |
+| **apt / unattended-upgrades** | Debian/Ubuntu embedded Linux | Package-based, simpler but not atomic |
+
+<Note>
+  All three hosted tools (Mender, Balena) require an account and a per-device agent. For air-gapped
+  deployments, SWUpdate with a local update server is the most appropriate choice.
+</Note>
+
+---
+
+## SWUpdate
+
+[SWUpdate](https://sbabic.github.io/swupdate/) applies a signed `.swu` image containing
+your firmware, application binary, and library updates. It does not disturb the credential
+partition if you design the image correctly.
+
+### Partition layout
+
+```
+/dev/mmcblk0p1   boot        (read-only)
+/dev/mmcblk0p2   rootfs-A    (active)
+/dev/mmcblk0p3   rootfs-B    (inactive — receives update)
+/dev/mmcblk0p4   data        (persistent — credentials live here)
+```
+
+The `data` partition is mounted at `/var/lib/humain` and is **never touched by SWUpdate**.
+Write your credential here:
+
+```bash
+sudo mount /dev/mmcblk0p4 /var/lib/humain
+sudo bash -c 'echo "HUMAIN_CREDENTIAL=hk_live_your_token_here" \
+    > /var/lib/humain/credential.env'
+sudo chmod 600 /var/lib/humain/credential.env
+```
+
+Update your systemd unit to read from the persistent partition:
+
+```ini
+[Service]
+EnvironmentFile=/var/lib/humain/credential.env
+ExecStart=/usr/local/bin/humain-kiosk
+```
+
+### Building the `.swu` image
+
+```bash
+# sw-description (SWUpdate manifest)
+software =
+{
+    version = "1.0.1";
+    hardware-compatibility = ["1.0"];
+
+    images: (
+        {
+            filename = "rootfs-B.ext4.gz";
+            device   = "/dev/mmcblk0p3";
+            compressed = true;
+            sha256 = "abc123...";
+        }
+    );
+}
+```
+
+```bash
+# Build the .swu archive
+echo sw-description | cpio -o -H newc > update.swu
+cat rootfs-B.ext4.gz >> update.swu
+
+# Apply locally
+swupdate -i update.swu
+```
+
+---
+
+## Mender
+
+[Mender](https://mender.io) provides an A/B partition OTA system with a hosted dashboard.
+The Mender client runs as a daemon and polls the Mender server for pending updates.
+
+### Install the Mender client
+
+```bash
+# Raspberry Pi (arm64, Debian)
+wget -q -O - https://downloads.mender.io/repos/debian/gpg.key | sudo apt-key add -
+echo "deb [arch=arm64] https://downloads.mender.io/repos/debian stable main" \
+    | sudo tee /etc/apt/sources.list.d/mender.list
+sudo apt update && sudo apt install -y mender-client
+```
+
+### Configure
+
+```bash
+# /etc/mender/mender.conf
+{
+    "ServerURL": "https://hosted.mender.io",
+    "TenantToken": "your_mender_tenant_token",
+    "DeviceTypeFile": "/var/lib/mender/device_type"
+}
+```
+
+### Credential preservation
+
+Mender stores persistent device data in `/data/mender/` by default. Symlink your credential
+file there:
+
+```bash
+sudo mkdir -p /data/humain
+sudo mv /var/lib/humain/credential.env /data/humain/credential.env
+sudo ln -s /data/humain/credential.env /var/lib/humain/credential.env
+```
+
+The `/data` partition is preserved across A/B updates by Mender's artifact installer.
+
+---
+
+## Balena Cloud
+
+[Balena](https://balena.io) runs your kiosk application as a Docker container. Updates are
+deployed by pushing a new image to the Balena registry — the on-device balenaEngine pulls
+and hot-swaps containers without rebooting.
+
+### `docker-compose.yml`
+
+```yaml
+version: "2"
+services:
+  humain-kiosk:
+    image: registry.balena-cloud.com/your-app/humain-kiosk:latest
+    restart: always
+    environment:
+      - HUMAIN_CREDENTIAL     # injected from Balena device variables
+    devices:
+      - /dev/snd              # audio hardware access
+    volumes:
+      - kiosk-data:/var/lib/humain
+
+volumes:
+  kiosk-data:               # persistent across updates
+```
+
+Set the credential as a **Device variable** in the Balena dashboard (not a fleet variable —
+each device needs its own):
+
+1. Open Balena Cloud → your fleet → select the device
+2. **Device variables → Add variable**
+3. Name: `HUMAIN_CREDENTIAL`, Value: `hk_live_your_token_here`
+
+Device variables are injected as environment variables into the container and are preserved
+across deployments and container restarts.
+
+### Pushing an update
+
+```bash
+# Build and push a new image
+balena push your-app-name
+```
+
+Balena performs a delta update — only changed layers are transferred, minimising bandwidth
+on cellular-connected devices.
+
+---
+
+## Credential preservation checklist
+
+Before deploying any OTA update mechanism, verify:
+
+- [ ] The credential is stored on a partition that is **not overwritten** by the update
+- [ ] The systemd unit (or container) reads the credential from the persistent location after update
+- [ ] The new library version is backward-compatible with your credential format
+  (`hk_live_` format has not changed since v1.0.0)
+- [ ] A failed update does not leave the device without a valid credential (test rollback)
+- [ ] Credential rotation can be performed independently of firmware updates (remote variable
+  update or SSH)

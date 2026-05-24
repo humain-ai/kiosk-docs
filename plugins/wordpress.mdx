@@ -1,0 +1,216 @@
+---
+title: "WordPress plugin"
+sidebarTitle: "WordPress"
+description: "Add an AI chat widget to any WordPress site in minutes — no code required."
+icon: "wordpress"
+---
+
+<Note>
+  This page is for WordPress site owners who want to add a chat widget without writing code. If
+  you are a developer building a custom integration, see the
+  [drop-in widget](/web/drop-in-widget) guide instead.
+</Note>
+
+The **Humain Kiosk** WordPress plugin installs a floating chat widget on your site. You configure
+it from the WordPress admin panel — no theme edits, no code, no build tools.
+
+---
+
+## Installation
+
+<Steps>
+  <Step title="Install the plugin">
+    In your WordPress dashboard, go to **Plugins → Add New Plugin**. Search for
+    **"Humain Kiosk"**. Click **Install Now**, then **Activate**.
+
+    <Accordion title="Screenshot — installing from the WordPress plugin directory">
+      {/* TODO: add screenshot of the plugin search results page */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Plugins → Add New → "Humain Kiosk" search result
+        </div>
+      </Frame>
+    </Accordion>
+
+    Alternatively, download the `.zip` from [the plugin page](https://wordpress.org/plugins/humain-kiosk/)
+    and upload it via **Plugins → Add New Plugin → Upload Plugin**.
+  </Step>
+
+  <Step title="Configure your credential">
+    Go to **Settings → Humain Kiosk**. Paste your device credential token into the
+    **Credential** field and click **Save settings**.
+
+    <Accordion title="Screenshot — entering your credential">
+      {/* TODO: add screenshot of the Humain Kiosk settings page, General tab */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Settings → Humain Kiosk → General tab → Credential field
+        </div>
+      </Frame>
+    </Accordion>
+
+    <Note>
+      You issue credentials from the Humain admin panel under **Kiosk → Credentials → Issue new
+      credential**. The token is shown only once — copy it before closing that page.
+    </Note>
+  </Step>
+
+  <Step title="Configure the widget appearance">
+    Click the **Appearance** tab in **Settings → Humain Kiosk**. Adjust:
+
+    - **Position** — bottom-right or bottom-left corner
+    - **Theme** — Light, Dark, or Auto (follows the visitor's OS preference)
+    - **Title** — text shown in the widget header
+    - **Primary colour** — accent colour for the button and chat bubbles
+    - **Initial message** — greeting shown when the widget first opens
+
+    The preview on the right updates live as you change settings.
+
+    <Accordion title="Screenshot — appearance settings with live preview">
+      {/* TODO: add screenshot of the Appearance tab with the preview panel visible */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Settings → Humain Kiosk → Appearance tab with live preview
+        </div>
+      </Frame>
+    </Accordion>
+  </Step>
+
+  <Step title="Embed the widget">
+    The plugin offers two ways to embed the chat widget:
+
+    <Tabs>
+      <Tab title="Shortcode">
+        Add `[humain_kiosk]` to any page, post, or widget area in the WordPress editor. The
+        floating chat button will appear only on pages that contain this shortcode.
+
+        <Accordion title="Screenshot — shortcode in the Classic editor">
+          {/* TODO: add screenshot of the Classic editor with [humain_kiosk] shortcode */}
+          <Frame>
+            <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+              Screenshot: Classic editor with [humain_kiosk] shortcode
+            </div>
+          </Frame>
+        </Accordion>
+
+        You can also override settings per-instance:
+        ```
+        [humain_kiosk title="Sales" position="bottom-left"]
+        ```
+      </Tab>
+      <Tab title="Gutenberg block">
+        In the block editor, click the **+** button to add a new block. Search for
+        **"Humain Kiosk"** and select it. The block embeds the widget — configure options from
+        the block settings panel on the right.
+
+        <Accordion title="Screenshot — inserting the Humain Kiosk block in Gutenberg">
+          {/* TODO: add screenshot of the block inserter with Humain Kiosk block selected */}
+          <Frame>
+            <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+              Screenshot: Gutenberg block inserter → "Humain Kiosk" block
+            </div>
+          </Frame>
+        </Accordion>
+      </Tab>
+    </Tabs>
+
+    If you want the widget to appear on **every page** without adding a shortcode, enable
+    **Global embed** in **Settings → Humain Kiosk → General**.
+  </Step>
+
+  <Step title="Test with sandbox mode">
+    Before going live, enable **Sandbox mode** in **Settings → Humain Kiosk → General**. In
+    sandbox mode, conversations use stub AI responses — no LLM credits are consumed.
+
+    Open your site, click the chat button, and send a test message. You should receive a
+    predictable sandbox response. Once you're satisfied, uncheck **Sandbox mode** and save.
+
+    <Accordion title="Screenshot — enabling sandbox mode">
+      {/* TODO: add screenshot of the General tab with Sandbox mode checkbox */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Settings → Humain Kiosk → General → Sandbox mode toggle
+        </div>
+      </Frame>
+    </Accordion>
+  </Step>
+</Steps>
+
+---
+
+## Advanced settings
+
+<AccordionGroup>
+  <Accordion title="Restricting the widget to specific pages">
+    By default, the widget appears on all pages when Global embed is enabled. To show it only
+    on specific pages:
+
+    1. Disable **Global embed** in **Settings → Humain Kiosk → General**.
+    2. Add the `[humain_kiosk]` shortcode only to the pages where you want the chat button.
+
+    Alternatively, use the **Page rules** setting to specify a list of page IDs or URL
+    patterns where the widget should appear or be hidden.
+  </Accordion>
+
+  <Accordion title="Custom CSS classes">
+    Add custom CSS classes to the widget container to override default styles:
+
+    In **Settings → Humain Kiosk → Appearance**, enter space-separated class names in the
+    **Custom CSS class** field. These classes are applied to the outermost widget element.
+
+    ```css
+    /* In your theme's style.css or the WordPress Customizer */
+    .my-kiosk-override {
+      --hk-primary: #7c3aed;
+      --hk-radius: 4px;
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="PHP filter hooks (for developers)">
+    The plugin exposes WordPress filter hooks for programmatic customisation:
+
+    **`humain_kiosk_widget_config`** — modify the widget configuration before it is rendered:
+
+    ```php
+    add_filter('humain_kiosk_widget_config', function ($config) {
+        // Add a custom initial message based on the current page
+        if (is_product()) {
+            $config['initialMessage'] = 'Hi! Do you have questions about this product?';
+        }
+        return $config;
+    });
+    ```
+
+    **`humain_kiosk_session_metadata`** — attach custom metadata to each session (passed to
+    the Humain API and available in your action endpoints):
+
+    ```php
+    add_filter('humain_kiosk_session_metadata', function ($metadata) {
+        if (is_user_logged_in()) {
+            $user = wp_get_current_user();
+            $metadata['user_id']    = $user->ID;
+            $metadata['user_email'] = $user->user_email;
+        }
+        $metadata['page_url'] = get_permalink();
+        return $metadata;
+    });
+    ```
+  </Accordion>
+
+  <Accordion title="WooCommerce integration">
+    When WooCommerce is active, the plugin automatically enables the **WooCommerce integration**
+    option in **Settings → Humain Kiosk → Integrations**. When enabled:
+
+    - On product pages, the current product name, SKU, and price are added to the session
+      metadata so the AI can answer product-specific questions.
+    - On the cart and checkout pages, the cart contents and total are included in metadata.
+    - On the order confirmation page, the order number and status are included.
+
+    Your kiosk's knowledge base and action endpoints can use this metadata to give contextual
+    answers like "Yes, this item is in stock" or "Your order #1234 is being prepared."
+
+    No additional configuration is required — enable the toggle and the metadata flows
+    automatically.
+  </Accordion>
+</AccordionGroup>

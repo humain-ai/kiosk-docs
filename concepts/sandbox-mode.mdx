@@ -1,0 +1,103 @@
+---
+title: "Sandbox"
+description: "Test your integration against a realistic API without consuming LLM credits or generating billing events."
+---
+
+## What is the sandbox?
+
+The sandbox is a parallel environment that mirrors the production API surface exactly. Requests go
+through the same pipeline — authentication, guardrails, session management — but LLM calls are
+replaced with deterministic stub responses. No credits are consumed and no usage is billed.
+
+<Tip>
+  Use the sandbox for all development and CI/CD testing. Switch to production only when you are
+  ready to go live.
+</Tip>
+
+## Base URLs
+
+<CodeGroup>
+```text Production
+https://api.humain.ai
+```
+
+```text Sandbox
+https://sandbox.api.humain.ai
+```
+</CodeGroup>
+
+The only difference is the base URL. All endpoint paths, request shapes, and response shapes are
+identical.
+
+## Credentials
+
+Your device credentials (`hk_live_…`) work against both environments. The environment is determined
+solely by the base URL you call — not the token.
+
+<Warning>
+  There is no separate sandbox token. The same credential works on both URLs. Be careful not to
+  accidentally point a production device at the sandbox base URL.
+</Warning>
+
+## Stub AI responses
+
+In sandbox mode the LLM is replaced with a stub that returns a short, predictable response:
+
+```json
+{
+  "response": "[Sandbox] I received your message. This is a test response.",
+  "actions_called": []
+}
+```
+
+Guardrail rules and FraudGuard run normally — a blocked phrase will still return `INPUT_REJECTED`
+in the sandbox. This lets you test your error-handling paths without needing a real LLM.
+
+## What is and isn't simulated
+
+| Behaviour | Sandbox | Production |
+|---|---|---|
+| Authentication (bearer token check) | ✅ Real | ✅ Real |
+| Session open / close | ✅ Real | ✅ Real |
+| Guardrail and FraudGuard checks | ✅ Real | ✅ Real |
+| Rate limiting | ✅ Real | ✅ Real |
+| LLM inference | 🔄 Stub | ✅ Real |
+| STT transcription (voice) | 🔄 Stub | ✅ Real |
+| TTS synthesis (voice) | 🔄 Stub | ✅ Real |
+| Usage billing | ❌ Not billed | ✅ Billed |
+| Knowledge base retrieval | ✅ Real | ✅ Real |
+
+## Switching environments in code
+
+Centralise the base URL in one place so switching environments is a one-line change.
+
+<CodeGroup>
+```javascript JavaScript
+const BASE_URL = process.env.NODE_ENV === 'production'
+  ? 'https://api.humain.ai'
+  : 'https://sandbox.api.humain.ai';
+
+const response = await fetch(`${BASE_URL}/v1/sessions`, {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${process.env.HUMAIN_TOKEN}` },
+  body: JSON.stringify({ mode: 'text' }),
+});
+```
+
+```python Python
+import os
+
+BASE_URL = (
+    "https://api.humain.ai"
+    if os.environ.get("ENV") == "production"
+    else "https://sandbox.api.humain.ai"
+)
+```
+
+```go Go
+baseURL := "https://sandbox.api.humain.ai"
+if os.Getenv("ENV") == "production" {
+    baseURL = "https://api.humain.ai"
+}
+```
+</CodeGroup>

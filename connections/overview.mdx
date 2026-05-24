@@ -1,0 +1,60 @@
+---
+title: "Connection types"
+description: "Choose the right transport for your channel. Humain supports REST, WebSocket streaming, WebRTC voice, and VoIP/SIP."
+---
+
+Humain exposes one API surface for all channel types. The `mode` you set when opening a session
+determines which transport patterns are available.
+
+## At a glance
+
+<Columns cols={2}>
+  <Card title="REST — text messaging" icon="paper-plane" href="/connections/rest-text">
+    Send a message, wait for the complete AI response. Simple, stateless request/response.
+    Best for backend integrations and low-frequency interactions.
+  </Card>
+  <Card title="WebSocket — streaming" icon="bolt" href="/connections/websocket-streaming">
+    Open a persistent connection and receive response tokens as they are generated. Delivers
+    the fastest perceived latency for chat interfaces.
+  </Card>
+  <Card title="WebRTC — real-time voice" icon="microphone" href="/connections/webrtc-voice">
+    Full-duplex audio over WebRTC. Server-side VAD, barge-in support, and sub-200 ms latency.
+    For kiosk terminals, drive-throughs, and any hands-free scenario.
+  </Card>
+  <Card title="VoIP / SIP" icon="phone" href="/connections/voip-sip">
+    Bridge a SIP trunk or PSTN phone line directly to the Humain AI. No WebRTC runtime needed
+    on the client side.
+  </Card>
+</Columns>
+
+## Which one should I use?
+
+| Scenario | Recommended transport |
+|---|---|
+| Website chat widget with streaming | WebSocket |
+| Backend server calling the AI | REST |
+| Touchscreen kiosk with typed input | REST or WebSocket |
+| Hands-free kiosk or terminal | WebRTC voice |
+| Drive-through ordering | WebRTC voice |
+| Call centre / IVR replacement | VoIP / SIP |
+| Phone support from mobile app | WebRTC voice |
+| IoT / embedded device | REST |
+
+## Mixing transports within a session
+
+A single session uses one mode for its lifetime. You cannot switch from `text` to `voice` mid-session.
+Open a new session if the user's channel changes (e.g. a chat user initiates a voice call).
+
+## Latency expectations
+
+| Transport | First-token latency | Typical end-to-end |
+|---|---|---|
+| REST (text) | N/A — full response | 1–3 s |
+| WebSocket (streaming) | ~300 ms | Streams until done |
+| WebRTC (voice) | ~150 ms (STT round-trip) | Near real-time |
+| VoIP / SIP | ~200 ms (STT round-trip) | Near real-time |
+
+<Note>
+  Latency figures are for the sandbox and production environments with a warm connection. Cold
+  start (first request in a session) adds ~100 ms for cache population.
+</Note>

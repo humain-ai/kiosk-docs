@@ -1,0 +1,168 @@
+---
+title: "Error codes"
+description: "All API errors follow a consistent JSON shape with a machine-readable code, a human-readable message, and optional details."
+---
+
+## Error response shape
+
+Every error response uses the same JSON envelope:
+
+```json
+{
+  "error": "SCREAMING_SNAKE_CASE_CODE",
+  "message": "Human-readable description of what went wrong.",
+  "details": {}
+}
+```
+
+<ResponseField name="error" type="string" required>
+  Machine-readable error code in `SCREAMING_SNAKE_CASE`. Use this field in `switch` statements
+  and retry logic — never parse the `message` string programmatically.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable description for logging and debugging. This string may change between API
+  versions — do not rely on its exact content.
+</ResponseField>
+
+<ResponseField name="details" type="object">
+  Additional error-specific fields. May be an empty object `{}`. See the table below for
+  codes that include structured details.
+</ResponseField>
+
+## Error codes reference
+
+| HTTP | Code | When it occurs |
+|---|---|---|
+| 400 | `INPUT_REJECTED` | Guardrail rule or FraudGuard blocked the user's input |
+| 400 | `SESSION_ENDED` | Session already closed or time limit reached |
+| 401 | `UNAUTHENTICATED` | Missing, malformed, or revoked device token |
+| 402 | `PLAN_LIMIT_REACHED` | Workspace has hit its plan's session or message ceiling |
+| 403 | `KIOSK_INACTIVE` | The kiosk's status in the admin panel is not *active* |
+| 403 | `CREDENTIAL_BLOCKED` | FraudGuard blocked this credential due to suspicious activity |
+| 422 | `VALIDATION_ERROR` | Request body failed schema validation |
+| 429 | `RATE_LIMITED` | Too many requests — back off and retry |
+| 500 | `INTERNAL_ERROR` | Unexpected server error |
+| 503 | `PROVIDER_ERROR` | LLM, STT, or TTS provider is temporarily unavailable |
+
+## Codes with structured details
+
+### `INPUT_REJECTED` — 400
+
+The user's input was blocked before reaching the LLM. Check `details.reason` to understand why.
+
+```json
+{
+  "error": "INPUT_REJECTED",
+  "message": "Input was rejected by a content rule.",
+  "details": {
+    "reason": "Contains a blocked phrase."
+  }
+}
+```
+
+Do not surface `reason` directly to end users — it may expose internal rule configuration.
+
+### `RATE_LIMITED` — 429
+
+The device has exceeded its allowed request rate. Back off for `details.retry_after_seconds`
+before retrying.
+
+```json
+{
+  "error": "RATE_LIMITED",
+  "message": "Rate limit exceeded.",
+  "details": {
+    "retry_after_seconds": 30
+  }
+}
+```
+
+### `VALIDATION_ERROR` — 422
+
+The request body did not match the expected schema. `details` is a map of field names to error
+messages.
+
+```json
+{
+  "error": "VALIDATION_ERROR",
+  "message": "Request body failed validation.",
+  "details": {
+    "mode": "must be one of: text, voice, voip"
+  }
+}
+```
+
+## Handling errors in code
+
+<CodeGroup>
+```javascript JavaScript
+const response = await fetch(`${BASE_URL}/v1/sessions/${sid}/message`, {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ input }),
+});
+
+if (!response.ok) {
+  const err = await response.json();
+
+  switch (err.error) {
+    case 'RATE_LIMITED':
+      const retryAfter = err.details?.retry_after_seconds ?? 5;
+      await sleep(retryAfter * 1000);
+      return retry();
+
+    case 'INPUT_REJECTED':
+      showUserMessage('I cannot help with that request.');
+      return;
+
+    case 'SESSION_ENDED':
+      await openNewSession();
+      return;
+
+    case 'PROVIDER_ERROR':
+      showUserMessage('AI is temporarily unavailable. Please try again in a moment.');
+      return;
+
+    default:
+      console.error('Humain API error', err);
+      throw new Error(err.message);
+  }
+}
+```
+
+```python Python
+import httpx
+import time
+
+def send_message(session_id: str, text: str, *, retries: int = 3):
+    for attempt in range(retries):
+        resp = client.post(
+            f"/v1/sessions/{session_id}/message",
+            json={"input": text},
+        )
+
+        if resp.status_code == 200:
+            return resp.json()
+
+        err = resp.json()
+        code = err.get("error")
+
+        if code == "RATE_LIMITED":
+            wait = err.get("details", {}).get("retry_after_seconds", 5)
+            time.sleep(wait)
+            continue
+
+        if code == "INPUT_REJECTED":
+            raise ValueError("Input rejected: " + err["message"])
+
+        if code == "PROVIDER_ERROR" and attempt < retries - 1:
+            time.sleep(2 ** attempt)
+            continue
+
+        raise RuntimeError(f"Humain API error [{code}]: {err['message']}")
+```
+</CodeGroup>

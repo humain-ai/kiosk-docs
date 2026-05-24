@@ -1,0 +1,200 @@
+---
+title: "REST — text messaging"
+description: "Send text messages and receive complete AI responses over plain HTTPS. The simplest integration path."
+---
+
+## How it works
+
+Text mode uses standard HTTP request/response. You open a session, send one or more messages, and
+close the session. Each message call waits for the full AI response before returning. For streaming
+token-by-token output, use [WebSocket streaming](/connections/websocket-streaming) instead.
+
+```mermaid
+sequenceDiagram
+  participant D as Device
+  participant A as Humain API
+
+  D->>A: POST /v1/sessions {"mode":"text"}
+  A-->>D: 201 {"session_id":"..."}
+
+  loop Conversation turns
+    D->>A: POST /v1/sessions/{sid}/message {"input":"..."}
+    A-->>D: 200 {"response":"...","actions_called":[]}
+  end
+
+  D->>A: POST /v1/sessions/{sid}/end
+  A-->>D: 204
+```
+
+## Step-by-step integration
+
+<Steps>
+  <Step title="Open a session">
+    Call `POST /v1/sessions` with `mode: "text"`. Store the returned `session_id`.
+
+    <CodeGroup>
+    ```bash cURL
+    curl -X POST https://api.humain.ai/v1/sessions \
+      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"mode":"text"}'
+    # → {"session_id":"3fa85f64-5717-4562-b3fc-2c963f66afa6"}
+    ```
+
+    ```javascript JavaScript
+    const { session_id } = await fetch('https://api.humain.ai/v1/sessions', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer hk_live_YOUR_TOKEN',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ mode: 'text' }),
+    }).then(r => r.json());
+    ```
+
+    ```python Python
+    resp = client.post('/v1/sessions', json={'mode': 'text'})
+    session_id = resp.json()['session_id']
+    ```
+
+    ```go Go
+    body := strings.NewReader(`{"mode":"text"}`)
+    req, _ := http.NewRequestWithContext(ctx, "POST",
+        "https://api.humain.ai/v1/sessions", body)
+    req.Header.Set("Authorization", "Bearer hk_live_YOUR_TOKEN")
+    req.Header.Set("Content-Type", "application/json")
+    resp, _ := http.DefaultClient.Do(req)
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Send messages">
+    POST to `/v1/sessions/{sid}/message` with the user's text. The response includes the AI's
+    complete reply and any action endpoints called during the turn.
+
+    <CodeGroup>
+    ```bash cURL
+    curl -X POST https://api.humain.ai/v1/sessions/SESSION_ID/message \
+      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"input":"What are your opening hours?"}'
+    # → {"response":"We are open Monday to Friday, 9 AM–6 PM.","actions_called":[]}
+    ```
+
+    ```javascript JavaScript
+    const { response, actions_called } = await fetch(
+      `https://api.humain.ai/v1/sessions/${session_id}/message`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer hk_live_YOUR_TOKEN',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ input: userText }),
+      }
+    ).then(r => r.json());
+
+    console.log(response); // Display to the user
+    ```
+
+    ```python Python
+    data = client.post(
+        f'/v1/sessions/{session_id}/message',
+        json={'input': user_text},
+    ).json()
+
+    print(data['response'])
+    ```
+
+    ```go Go
+    payload := fmt.Sprintf(`{"input":%q}`, userText)
+    req, _ := http.NewRequestWithContext(ctx, "POST",
+        "https://api.humain.ai/v1/sessions/"+sessionID+"/message",
+        strings.NewReader(payload))
+    req.Header.Set("Authorization", "Bearer hk_live_YOUR_TOKEN")
+    req.Header.Set("Content-Type", "application/json")
+    resp, _ := http.DefaultClient.Do(req)
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="End the session">
+    Always call `POST /v1/sessions/{sid}/end` when the conversation finishes.
+
+    <CodeGroup>
+    ```bash cURL
+    curl -X POST https://api.humain.ai/v1/sessions/SESSION_ID/end \
+      -H "Authorization: Bearer hk_live_YOUR_TOKEN"
+    # → 204 No Content
+    ```
+
+    ```javascript JavaScript
+    await fetch(`https://api.humain.ai/v1/sessions/${session_id}/end`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer hk_live_YOUR_TOKEN' },
+    });
+    ```
+
+    ```python Python
+    client.post(f'/v1/sessions/{session_id}/end')
+    ```
+
+    ```go Go
+    req, _ := http.NewRequestWithContext(ctx, "POST",
+        "https://api.humain.ai/v1/sessions/"+sessionID+"/end", nil)
+    req.Header.Set("Authorization", "Bearer hk_live_YOUR_TOKEN")
+    http.DefaultClient.Do(req)
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Response fields
+
+<ResponseField name="response" type="string">
+  The AI's complete text response after all guardrail and PII processing.
+</ResponseField>
+
+<ResponseField name="actions_called" type="string[]">
+  Names of any action endpoints (tools) called during this turn. Empty array if no tools were
+  invoked. Useful for debugging and audit logging.
+</ResponseField>
+
+## Advanced topics
+
+<AccordionGroup>
+  <Accordion title="Handling guardrail rejections">
+    If the user's input triggers a guardrail rule, the API returns `400 INPUT_REJECTED` instead
+    of a message response. Display a neutral message to the user and do not retry automatically.
+
+    ```javascript
+    if (response.status === 400) {
+      const err = await response.json();
+      if (err.error === 'INPUT_REJECTED') {
+        displayToUser("I'm not able to help with that request.");
+        return; // Don't retry
+      }
+    }
+    ```
+  </Accordion>
+  <Accordion title="Retrying on provider errors">
+    `503 PROVIDER_ERROR` means the LLM is temporarily unavailable. Use exponential back-off:
+    wait 1 s, then 2 s, then 4 s. Cap at 3 retries. If still failing, surface a generic error.
+
+    ```javascript
+    async function sendWithRetry(sessionId, input, attempt = 0) {
+      const resp = await fetch(/* ... */);
+      if (resp.status === 503 && attempt < 3) {
+        await sleep((2 ** attempt) * 1000);
+        return sendWithRetry(sessionId, input, attempt + 1);
+      }
+      return resp.json();
+    }
+    ```
+  </Accordion>
+  <Accordion title="Connection pooling (server-side devices)">
+    For high-throughput server-side integrations, reuse HTTP connections with `keep-alive`.
+    In Node.js use a shared `http.Agent`; in Python use a single `httpx.Client` instance;
+    in Go use the default `http.DefaultTransport` (already pooled).
+  </Accordion>
+</AccordionGroup>

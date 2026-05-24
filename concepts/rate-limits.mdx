@@ -1,0 +1,70 @@
+---
+title: "Rate limits"
+description: "Humain applies rate limits at two levels — per-credential burst protection and per-session sustained limits — to keep the platform stable for all customers."
+---
+
+## Two layers of rate limiting
+
+### Burst protection (per credential)
+
+A short sliding window (10 seconds) caps the number of requests any single credential can send.
+This protects against runaway devices and credential misuse. When exceeded, the API returns `429
+RATE_LIMITED`.
+
+### Sustained rate limit (per session)
+
+A guardrail rule (configured per kiosk in the admin panel) limits the number of messages per minute
+within a single session. This is the primary tool for controlling cost and preventing abuse by end
+users.
+
+## Rate limit response
+
+When either limit is hit the API returns:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+
+{
+  "error": "RATE_LIMITED",
+  "message": "Rate limit exceeded.",
+  "details": {
+    "retry_after_seconds": 30
+  }
+}
+```
+
+Always read `details.retry_after_seconds` and back off for at least that long before retrying.
+
+## Retry strategy
+
+<Steps>
+  <Step title="Check the status code">
+    `429` is the only retriable rate limit response. Do not retry `400`, `401`, or `403` —
+    those indicate a problem that retrying will not fix.
+  </Step>
+  <Step title="Read retry_after_seconds">
+    Use the value from `details.retry_after_seconds`. If absent, default to 5 seconds.
+  </Step>
+  <Step title="Add jitter">
+    When multiple devices share a credential, add random jitter (0–2 s) to prevent a
+    thundering-herd of retries at exactly the same moment.
+  </Step>
+  <Step title="Cap your retries">
+    Retry at most 3 times. If still rate-limited after 3 attempts, surface an error to the
+    user rather than spinning indefinitely.
+  </Step>
+</Steps>
+
+## Configuring limits
+
+Sustained session rate limits are set in the admin panel:
+
+1. Open your workspace.
+2. Navigate to **Kiosk → Guardrails → Rate limit**.
+3. Set **Max messages per minute** and **Max tokens per turn**.
+
+<Info>
+  Burst limits are fixed per plan and cannot be configured. Contact support if your legitimate
+  traffic pattern regularly hits the burst limit.
+</Info>

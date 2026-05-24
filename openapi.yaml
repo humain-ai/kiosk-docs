@@ -1,0 +1,454 @@
+openapi: 3.1.0
+info:
+  title: Humain Kiosk — Device API
+  version: "1.0"
+  description: |
+    The Device API is consumed by physical kiosk terminals, VoIP adapters, and website
+    widgets. All requests require a device credential issued from the Humain admin panel.
+
+    **Base URL — production:** `https://api.humain.ai`
+    **Base URL — sandbox:** `https://sandbox.api.humain.ai`
+
+    Sandbox credentials (`hk_live_…`) work against the sandbox base URL only. Responses
+    are realistic but no real LLM credits are consumed and no usage is billed.
+
+servers:
+  - url: https://api.humain.ai
+    description: Production
+  - url: https://sandbox.api.humain.ai
+    description: Sandbox — safe for testing, no billing
+
+security:
+  - DeviceToken: []
+
+tags:
+  - name: Sessions
+    description: Open, interact with, and close conversation sessions.
+  - name: Voice (WebRTC)
+    description: Establish real-time voice sessions over WebRTC.
+
+paths:
+  /v1/sessions:
+    post:
+      operationId: openSession
+      tags: [Sessions]
+      summary: Open a session
+      description: |
+        Creates a new conversation session for the authenticated kiosk. Returns a
+        `session_id` that must be supplied to every subsequent session request.
+
+        The `mode` field determines which interaction pattern is available:
+        - `text` — REST messages and WebSocket streaming
+        - `voice` — WebRTC real-time audio
+        - `voip` — SIP / VoIP telephony bridge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenSessionRequest"
+            examples:
+              text:
+                summary: Open a text session
+                value:
+                  mode: text
+              voice:
+                summary: Open a voice session
+                value:
+                  mode: voice
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenSessionResponse"
+              example:
+                session_id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "402":
+          $ref: "#/components/responses/PlanLimitReached"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ProviderError"
+
+  /v1/sessions/{sid}/message:
+    post:
+      operationId: sendMessage
+      tags: [Sessions]
+      summary: Send a message
+      description: |
+        Sends a text input to the AI and returns the complete response. The guardrail
+        pipeline runs on both the input and the output before the response is returned.
+
+        For streaming token-by-token output, use the WebSocket endpoint instead.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageRequest"
+            example:
+              input: "What are your opening hours?"
+      responses:
+        "200":
+          description: AI response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+              example:
+                response: "We are open Monday to Friday, 9 AM to 6 PM."
+                actions_called: []
+        "400":
+          $ref: "#/components/responses/InputRejected"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ProviderError"
+
+  /v1/sessions/{sid}/stream:
+    get:
+      operationId: streamSession
+      tags: [Sessions]
+      summary: Stream session (WebSocket)
+      description: |
+        Upgrades the HTTP connection to a WebSocket for streaming text responses
+        token by token. This endpoint uses the standard HTTP `101 Switching Protocols`
+        response.
+
+        **Sending a message** — send a JSON frame:
+        ```json
+        {"input": "What are your opening hours?"}
+        ```
+
+        **Receiving tokens** — the server streams:
+        ```json
+        {"type": "token", "token": "We "}
+        {"type": "token", "token": "are "}
+        {"type": "done", "actions_called": []}
+        ```
+
+        **Errors** — the server sends a close frame with a 4xxx code on fatal errors.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "101":
+          description: Switching Protocols — WebSocket connection established
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/sessions/{sid}/end:
+    post:
+      operationId: endSession
+      tags: [Sessions]
+      summary: End a session
+      description: |
+        Closes the session, flushes usage events, and releases server resources.
+        Always call this endpoint when the conversation ends — sessions left open are
+        cleaned up automatically after 30 minutes, but calling end explicitly is faster
+        and more accurate for billing.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "204":
+          description: Session closed — no body returned
+        "400":
+          $ref: "#/components/responses/SessionEnded"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /v1/sessions/{sid}/webrtc/offer:
+    post:
+      operationId: webrtcOffer
+      tags: [Voice (WebRTC)]
+      summary: Exchange WebRTC SDP offer
+      description: |
+        Sends the client's SDP offer and returns the server's SDP answer. Call this after
+        `RTCPeerConnection.createOffer()` and `setLocalDescription()`. Once you receive
+        the answer, call `setRemoteDescription()` on the peer connection.
+
+        ICE candidates can be submitted concurrently via `POST /v1/sessions/{sid}/webrtc/ice`.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebRTCOfferRequest"
+      responses:
+        "200":
+          description: SDP answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebRTCOfferResponse"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ProviderError"
+
+  /v1/sessions/{sid}/webrtc/ice:
+    post:
+      operationId: submitICECandidate
+      tags: [Voice (WebRTC)]
+      summary: Submit ICE candidate
+      description: |
+        Submits a WebRTC ICE candidate discovered by the client during the connection
+        establishment phase. Call this for each candidate emitted by the
+        `RTCPeerConnection.onicecandidate` event.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebRTCICERequest"
+      responses:
+        "204":
+          description: ICE candidate accepted — no body returned
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    DeviceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: hk_live_{43-char-base64url}
+      description: |
+        Device credential issued from the Humain admin panel under
+        **Kiosk → Credentials → Issue new credential**.
+
+        Format: `hk_live_` followed by 43 base64url characters (32 random bytes).
+        The raw token is shown only once at creation time and is never stored in plain text.
+
+  parameters:
+    SessionId:
+      name: sid
+      in: path
+      required: true
+      description: Session UUID returned by `POST /v1/sessions`
+      schema:
+        type: string
+        format: uuid
+        example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+  schemas:
+    OpenSessionRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [text, voice, voip]
+          description: |
+            The session interaction mode.
+            - `text` — REST + WebSocket messaging
+            - `voice` — WebRTC real-time audio
+            - `voip` — SIP telephony bridge
+
+    OpenSessionResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+          description: Unique session identifier — pass this to all subsequent calls.
+
+    MessageRequest:
+      type: object
+      required: [input]
+      properties:
+        input:
+          type: string
+          maxLength: 4096
+          description: The user's text input.
+
+    MessageResponse:
+      type: object
+      properties:
+        response:
+          type: string
+          description: The AI's complete text response after guardrail processing.
+        actions_called:
+          type: array
+          items:
+            type: string
+          description: |
+            Names of action endpoints invoked during this turn (e.g. `fetch_availability`).
+            Empty array if no tools were called.
+
+    WebRTCOfferRequest:
+      type: object
+      required: [sdp]
+      properties:
+        sdp:
+          type: string
+          description: SDP offer string from `RTCPeerConnection.createOffer()`.
+
+    WebRTCOfferResponse:
+      type: object
+      properties:
+        sdp:
+          type: string
+          description: Server SDP answer — pass to `RTCPeerConnection.setRemoteDescription()`.
+
+    WebRTCICERequest:
+      type: object
+      required: [candidate, sdp_mid, sdp_mline_index]
+      properties:
+        candidate:
+          type: string
+          description: ICE candidate string from `RTCPeerConnection.onicecandidate`.
+        sdp_mid:
+          type: string
+          description: Media stream identification tag (`candidate.sdpMid`).
+        sdp_mline_index:
+          type: integer
+          description: Index of the media description (`candidate.sdpMLineIndex`).
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code in SCREAMING_SNAKE_CASE.
+          example: UNAUTHENTICATED
+        message:
+          type: string
+          description: Human-readable description of the error.
+          example: Missing or invalid device token.
+        details:
+          type: object
+          description: Additional error-specific fields (see individual error descriptions).
+
+  responses:
+    Unauthenticated:
+      description: Missing or invalid device token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: UNAUTHENTICATED
+            message: Missing or invalid device token.
+            details: {}
+
+    Forbidden:
+      description: |
+        Valid token but the request is not permitted. One of:
+        - `KIOSK_INACTIVE` — the kiosk's status is not *active*
+        - `CREDENTIAL_BLOCKED` — FraudGuard blocked this credential
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            kioskInactive:
+              summary: Kiosk not active
+              value:
+                error: KIOSK_INACTIVE
+                message: This kiosk is not currently active.
+                details: {}
+            credentialBlocked:
+              summary: Credential blocked by FraudGuard
+              value:
+                error: CREDENTIAL_BLOCKED
+                message: This credential has been blocked due to suspicious activity.
+                details: {}
+
+    PlanLimitReached:
+      description: The workspace has reached its plan's session limit.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: PLAN_LIMIT_REACHED
+            message: Monthly session limit reached. Upgrade your plan to continue.
+            details: {}
+
+    RateLimited:
+      description: |
+        Too many requests. Slow down and retry after `details.retry_after_seconds`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: RATE_LIMITED
+            message: Rate limit exceeded.
+            details:
+              retry_after_seconds: 30
+
+    InputRejected:
+      description: |
+        The input was blocked by a guardrail rule or FraudGuard pattern detection.
+        `details.reason` describes why.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: INPUT_REJECTED
+            message: Input was rejected by a content rule.
+            details:
+              reason: Contains a blocked phrase.
+
+    SessionEnded:
+      description: The session has already ended or the time limit was reached.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: SESSION_ENDED
+            message: This session has already ended.
+            details: {}
+
+    ProviderError:
+      description: |
+        The LLM, STT, or TTS provider returned an error or is temporarily unavailable.
+        Retry with exponential back-off.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: PROVIDER_ERROR
+            message: AI provider is temporarily unavailable. Please retry.
+            details: {}
+
+    InternalError:
+      description: Unexpected server-side error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: INTERNAL_ERROR
+            message: An unexpected error occurred.
+            details: {}

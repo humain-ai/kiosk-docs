@@ -1,0 +1,88 @@
+---
+title: "VoIP & SIP"
+description: "VoIP and SIP connections require a physical telephony stack and cannot be tested from a browser. Use these tools to test locally."
+---
+
+VoIP mode requires a SIP trunk, PBX, or ATA adapter — none of which run in a browser. Use one of
+the tools below to test your VoIP integration locally before connecting to production.
+
+## Testing tools
+
+<Columns cols={2}>
+  <Card title="Linphone Desktop" icon="desktop" href="https://www.linphone.org/technical-corner/linphone">
+    Open-source SIP softphone for macOS, Windows, and Linux. Configure it to register against
+    the Humain SIP endpoint and make test calls without physical hardware.
+  </Card>
+  <Card title="PJSUA2 CLI" icon="terminal" href="https://docs.pjsip.org/en/latest/pjsua2/using/index.html">
+    Command-line SIP client from the PJSIP project. Scriptable and useful for automated
+    integration tests in CI pipelines.
+  </Card>
+  <Card title="Asterisk (Docker)" icon="cube" href="https://hub.docker.com/r/andrius/asterisk">
+    Run a full Asterisk PBX in Docker. Configure a dial plan to route calls to the Humain SIP
+    endpoint and test your IVR replacement end-to-end.
+  </Card>
+  <Card title="Twilio Studio (free tier)" icon="cloud" href="https://www.twilio.com/en-us/studio">
+    Use Twilio's visual call flow builder to route a real phone number to the Humain SIP
+    endpoint. Test with an actual PSTN call from any phone.
+  </Card>
+</Columns>
+
+## Minimal cURL test
+
+You can still exercise the VoIP session lifecycle from the command line — only the audio bridge
+requires telephony hardware:
+
+```bash
+# 1. Open a VoIP session
+SESSION=$(curl -s -X POST https://sandbox.api.humain.ai/v1/sessions \
+  -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"voip"}' | jq -r .session_id)
+
+echo "Session ID: $SESSION"
+
+# 2. End the session (simulating a hang-up)
+curl -s -X POST "https://sandbox.api.humain.ai/v1/sessions/$SESSION/end" \
+  -H "Authorization: Bearer hk_live_YOUR_TOKEN"
+
+echo "Session closed."
+```
+
+This verifies that your credential is valid and that session open/close works correctly before you
+wire up the SIP bridge.
+
+## Downloads
+
+<Columns cols={3}>
+  <Card
+    title="Postman collection"
+    icon="rectangle-list"
+    href="https://github.com/humain/kiosk-c/releases/latest/download/humain-kiosk.postman_collection.json"
+  >
+    Import into Postman to test all Device API endpoints with pre-configured authentication and
+    example request bodies.
+  </Card>
+  <Card
+    title="Raspberry Pi test binary"
+    icon="cpu"
+    href="https://github.com/humain/kiosk-c/releases/latest/download/kiosk-test-rpi-arm64"
+  >
+    Prebuilt arm64 binary. Runs on a Raspberry Pi 3/4/5 to verify connectivity and credential
+    validity without compiling from source.
+  </Card>
+  <Card
+    title="SIP test config"
+    icon="phone"
+    href="https://github.com/humain/kiosk-freepbx/releases/latest/download/test-sip-config.zip"
+  >
+    Sample SIP configuration archive for Asterisk and FreePBX. Includes a dialplan, pjsip trunk
+    definition, and test call script.
+  </Card>
+</Columns>
+
+## Next steps
+
+- Read the [VoIP / SIP connection guide](/connections/voip-sip) for the full setup walkthrough.
+- Explore the [C library](/embedded/c-library) for embedded Linux and microcontroller integration.
+- Contact [support@humain.ai](mailto:support@humain.ai) to get the SIP endpoint credentials for
+  your workspace.

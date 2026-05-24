@@ -1,0 +1,183 @@
+---
+title: "3CX plugin"
+sidebarTitle: "3CX"
+description: "Add a Humain Kiosk AI destination to 3CX using a CallFlow app — no scripting required."
+icon: "headset"
+---
+
+<Note>
+  This page is for 3CX administrators who want to route calls to the Humain AI using the 3CX
+  management interface. For programmatic control via SIP trunk without the plugin, see the
+  [SIP gateway](/voip/sip-gateway) guide instead.
+</Note>
+
+The **Humain Kiosk** 3CX app is a **CallFlow application** that appears as a destination in the
+3CX call routing editor. Route any inbound DID, IVR option, or queue overflow to the Humain AI
+— configured entirely from the 3CX Management Console.
+
+---
+
+## Installation
+
+<Steps>
+  <Step title="Install the app from the 3CX App Marketplace">
+    In the **3CX Management Console**, go to **Integrations → 3CX App Marketplace**. Search for
+    **"Humain Kiosk"** and click **Get App**.
+
+    <Accordion title="Screenshot — installing from the 3CX App Marketplace">
+      {/* TODO: add screenshot of Integrations → 3CX App Marketplace → Humain Kiosk */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Integrations → 3CX App Marketplace → Humain Kiosk → Get App
+        </div>
+      </Frame>
+    </Accordion>
+
+    Alternatively, download the `.zip` from the
+    [3CX App Marketplace page](https://www.3cx.com/app-marketplace/humain-kiosk/) and install
+    it via **Integrations → 3CX Apps → Upload App**.
+  </Step>
+
+  <Step title="Configure your credential">
+    After installation, go to **Integrations → 3CX Apps → Humain Kiosk → Settings**. Paste your
+    device credential token into the **Credential** field and click **Save**.
+
+    <Accordion title="Screenshot — Humain Kiosk app settings">
+      {/* TODO: add screenshot of Humain Kiosk app Settings tab with Credential field */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Integrations → 3CX Apps → Humain Kiosk → Settings → Credential field
+        </div>
+      </Frame>
+    </Accordion>
+
+    <Note>
+      Issue credentials from the Humain admin panel under **Kiosk → Credentials → Issue new
+      credential**. The token is displayed only once — copy it before closing that page.
+    </Note>
+  </Step>
+
+  <Step title="Add a Humain Kiosk CallFlow destination">
+    Go to **Call Routing → CallFlow**. Click **Add App Instance** and select **Humain Kiosk**.
+    Configure the instance:
+
+    - **Name** — a label for this CallFlow destination (e.g., "AI Receptionist")
+    - **Codec** — G.722 recommended; G.711 PCMU for legacy carrier compatibility
+    - **Maximum call duration** — timeout in seconds (0 = unlimited)
+    - **Fallback extension** — where to transfer if the AI session cannot be opened
+
+    <Accordion title="Screenshot — adding a Humain Kiosk CallFlow instance">
+      {/* TODO: add screenshot of CallFlow → Add App Instance → Humain Kiosk configuration */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Call Routing → CallFlow → Add App Instance → Humain Kiosk settings form
+        </div>
+      </Frame>
+    </Accordion>
+
+    Click **OK**, then **Save** the CallFlow.
+  </Step>
+
+  <Step title="Route calls to the AI">
+    With the CallFlow instance saved, you can route calls to it from anywhere in 3CX:
+
+    <Tabs>
+      <Tab title="Inbound rule">
+        Go to **Call Routing → Inbound Rules**. Edit the rule for your DID number. Set the
+        **Route calls to** destination to your Humain Kiosk CallFlow instance.
+
+        <Accordion title="Screenshot — inbound rule pointing to Humain Kiosk">
+          {/* TODO: add screenshot of Inbound Rules → Route calls to → Humain Kiosk CallFlow */}
+          <Frame>
+            <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+              Screenshot: Call Routing → Inbound Rules → Route calls to → Humain Kiosk
+            </div>
+          </Frame>
+        </Accordion>
+      </Tab>
+      <Tab title="Digital receptionist (IVR)">
+        Go to **Call Routing → Digital Receptionist**. Edit your IVR menu and assign a menu
+        option (e.g., press `2` for AI support) to the Humain Kiosk CallFlow destination.
+
+        <Accordion title="Screenshot — digital receptionist option to Humain Kiosk">
+          {/* TODO: add screenshot of Digital Receptionist → option 2 → Humain Kiosk */}
+          <Frame>
+            <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+              Screenshot: Digital Receptionist → IVR option 2 → Humain Kiosk CallFlow
+            </div>
+          </Frame>
+        </Accordion>
+      </Tab>
+      <Tab title="Queue overflow">
+        Go to **Call Routing → Call Queues**. Edit your queue and set the **Overflow destination**
+        to the Humain Kiosk CallFlow instance. When the queue is full or wait time exceeds the
+        threshold, callers are transferred to the AI.
+
+        <Accordion title="Screenshot — queue overflow to Humain Kiosk">
+          {/* TODO: add screenshot of Call Queues → Overflow destination → Humain Kiosk */}
+          <Frame>
+            <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+              Screenshot: Call Routing → Call Queues → Overflow destination → Humain Kiosk
+            </div>
+          </Frame>
+        </Accordion>
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Test with sandbox mode">
+    Before going live, enable **Sandbox mode** in **Integrations → 3CX Apps → Humain Kiosk →
+    Settings**. In sandbox mode, the AI uses stub responses so you can verify call routing
+    without consuming LLM credits.
+
+    Call the DID or trigger the IVR option and confirm you hear the sandbox response. Then
+    disable sandbox mode and save.
+
+    <Accordion title="Screenshot — sandbox mode in 3CX app settings">
+      {/* TODO: add screenshot of Humain Kiosk Settings → Sandbox mode toggle */}
+      <Frame>
+        <div style={{ height: 200, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', borderRadius: 8 }}>
+          Screenshot: Integrations → 3CX Apps → Humain Kiosk → Settings → Sandbox mode toggle
+        </div>
+      </Frame>
+    </Accordion>
+  </Step>
+</Steps>
+
+---
+
+## Advanced settings
+
+<AccordionGroup>
+  <Accordion title="Caller metadata">
+    When **Pass caller metadata** is enabled (default: on) in the app settings, the plugin
+    passes the following fields to each Humain Kiosk session:
+
+    | Metadata key | Value |
+    |---|---|
+    | `caller_id` | Caller CLI (ANI) |
+    | `did` | Dialled DID (DNIS) |
+    | `queue_name` | Source queue name, if routed from a queue |
+    | `wait_time_seconds` | Time the caller spent waiting before AI answered |
+
+    Your kiosk's action endpoints can use this data to personalise the response — for example,
+    greeting callers by name after a CRM lookup.
+  </Accordion>
+
+  <Accordion title="Transferring back to a live agent">
+    The Humain AI can transfer a call back to a 3CX extension or queue using the **Transfer**
+    action defined in your kiosk's action endpoints. Configure the target extension number in
+    the action endpoint's response payload; the 3CX plugin will execute a supervised transfer.
+
+    See the admin panel (**Kiosk → Actions**) for configuring action endpoints.
+  </Accordion>
+
+  <Accordion title="Supported 3CX versions">
+    | 3CX version | Support |
+    |---|---|
+    | 3CX v20 (latest) | ✅ Fully supported |
+    | 3CX v18 | ✅ Supported |
+    | 3CX v16 | ⚠ Limited — CallFlow apps require v18+ for some features |
+    | 3CX v15.5 and earlier | ❌ Not supported |
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,283 @@
+---
+title: "Android audio configuration"
+description: "Complete AudioManager and AudioFocus reference for Humain Kiosk voice integration on Android."
+icon: "volume-high"
+---
+
+This page is a reference for Android audio configuration in apps using the Humain Kiosk voice
+SDK. Read this if you need to customise audio routing beyond what the
+[Android guide](/mobile/android-kotlin) covers, or if you are integrating the SDK into an app
+that already manages `AudioManager` or audio focus.
+
+---
+
+## AudioManager mode
+
+The `AudioManager` mode controls how audio hardware behaves. For voice sessions, use
+`MODE_IN_COMMUNICATION`:
+
+```kotlin
+import android.media.AudioManager
+import android.content.Context
+
+fun configureAudioManager(context: Context) {
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+    // Route audio to speaker by default (not earpiece)
+    audioManager.isSpeakerphoneOn = true
+}
+
+fun restoreAudioManager(context: Context) {
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    audioManager.isSpeakerphoneOn = false
+    audioManager.mode = AudioManager.MODE_NORMAL
+}
+```
+
+| Mode | Effect | When to use |
+|---|---|---|
+| `MODE_IN_COMMUNICATION` | **Recommended** — activates echo cancellation, AGC, and noise suppression for VoIP | AI voice assistants, in-app calling |
+| `MODE_IN_CALL` | Designed for GSM calls — may not support all BT profiles | Carrier calling apps |
+| `MODE_NORMAL` | Default — no VoIP processing | Music, media playback |
+| `MODE_RINGTONE` | Ring stream — short-lived, do not use for conversations | Ringtone playback |
+
+---
+
+## Speaker vs earpiece
+
+Control whether audio plays through the loudspeaker or the earpiece:
+
+```kotlin
+val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+// Loudspeaker (default for kiosk / hands-free scenarios)
+audioManager.isSpeakerphoneOn = true
+
+// Earpiece (held-to-ear phone experience)
+audioManager.isSpeakerphoneOn = false
+```
+
+<Note>
+  `isSpeakerphoneOn` only takes effect when `audioManager.mode == MODE_IN_COMMUNICATION`.
+  Setting it in `MODE_NORMAL` has no effect.
+</Note>
+
+---
+
+## ProximityWakeLock — auto earpiece on approach
+
+Enable auto-switching to earpiece when the user holds the device to their ear. This requires
+the `WAKE_LOCK` permission:
+
+```xml
+<!-- AndroidManifest.xml -->
+<uses-permission android:name="android.permission.WAKE_LOCK" />
+```
+
+```kotlin
+import android.os.PowerManager
+
+class ProximityAudioRouter(context: Context) {
+    private val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+    // Proximity wake lock turns off the screen and switches to earpiece
+    // when the sensor detects the device is held to the ear
+    private val proximityLock: PowerManager.WakeLock = powerManager.newWakeLock(
+        PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
+        "HumainKiosk:Proximity"
+    )
+
+    fun start() {
+        if (!proximityLock.isHeld) {
+            proximityLock.acquire()
+        }
+    }
+
+    fun stop() {
+        if (proximityLock.isHeld) {
+            // RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY releases after sensor detects no proximity
+            proximityLock.release(PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY)
+        }
+        // Ensure speaker mode is restored
+        audioManager.isSpeakerphoneOn = true
+    }
+}
+```
+
+Use `ProximityAudioRouter.start()` when the voice session starts and `stop()` when it ends.
+
+---
+
+## AudioFocusRequest
+
+Request audio focus before starting the voice session. This ensures your app is notified when
+another source (phone call, navigation, alarm) needs audio:
+
+```kotlin
+import android.media.AudioFocusRequest
+import android.media.AudioAttributes
+import android.media.AudioManager
+
+class AudioFocusManager(private val context: Context) {
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var focusRequest: AudioFocusRequest? = null
+
+    // Returns true if focus was granted
+    fun request(onFocusChange: (Int) -> Unit): Boolean {
+        val listener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+            onFocusChange(focusChange)
+        }
+
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAcceptsDelayedFocusGain(false)
+            .setWillPauseWhenDucked(false)
+            .setOnAudioFocusChangeListener(listener)
+            .build()
+
+        focusRequest = request
+        return audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+    }
+
+    fun abandon() {
+        focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+        focusRequest = null
+    }
+}
+```
+
+Handle focus changes in the callback:
+
+```kotlin
+val focusManager = AudioFocusManager(context)
+focusManager.request { focusChange ->
+    when (focusChange) {
+        AudioManager.AUDIOFOCUS_LOSS,
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+            // Phone call started — mute the voice session
+            voiceSession?.isMuted = true
+        }
+        AudioManager.AUDIOFOCUS_GAIN -> {
+            // Focus returned — unmute
+            voiceSession?.isMuted = false
+        }
+        AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+            // Navigation prompt or notification — stay unmuted (user is talking)
+        }
+    }
+}
+```
+
+---
+
+## Bluetooth SCO
+
+Enable the Bluetooth SCO profile to route audio through a paired Bluetooth headset (HFP —
+Hands-Free Profile):
+
+```kotlin
+class BluetoothScoManager(private val context: Context) {
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var scoReceiver: BroadcastReceiver? = null
+
+    // Start SCO and wait for it to connect via BroadcastReceiver
+    fun enable(onConnected: () -> Unit) {
+        if (!audioManager.isBluetoothScoAvailableOffCall) {
+            onConnected() // SCO not available — proceed with speaker
+            return
+        }
+
+        scoReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
+                if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
+                    audioManager.isBluetoothScoOn = true
+                    onConnected()
+                }
+            }
+        }
+
+        context.registerReceiver(
+            scoReceiver,
+            IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
+        )
+        audioManager.startBluetoothSco()
+    }
+
+    fun disable() {
+        scoReceiver?.let {
+            try { context.unregisterReceiver(it) } catch (_: Exception) {}
+            scoReceiver = null
+        }
+        audioManager.isBluetoothScoOn = false
+        audioManager.stopBluetoothSco()
+    }
+}
+```
+
+Required manifest entry:
+
+```xml
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+```
+
+<Note>
+  Bluetooth SCO (`startBluetoothSco`) is asynchronous — the connection may take 200–2000 ms.
+  Do not start the voice session until the `SCO_AUDIO_STATE_CONNECTED` broadcast is received.
+  If SCO is unavailable, fall back to speakerphone.
+</Note>
+
+---
+
+## Full configuration sequence
+
+The recommended order for starting a voice session:
+
+```kotlin
+suspend fun startVoiceSession(context: Context) {
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+    // 1. Request audio focus
+    val focusGranted = focusManager.request { change -> handleFocusChange(change) }
+    if (!focusGranted) return  // Another app holds focus — retry later
+
+    // 2. Set AudioManager mode
+    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+
+    // 3. Configure routing (speaker or BT)
+    if (audioManager.isBluetoothScoAvailableOffCall) {
+        bluetoothScoManager.enable { /* SCO connected — proceed */ }
+    } else {
+        audioManager.isSpeakerphoneOn = true
+        // Proceed to step 4 immediately
+    }
+
+    // 4. Enable ProximityWakeLock (optional — for phone-held-to-ear UX)
+    proximityRouter.start()
+
+    // 5. Open and start the voice session
+    voiceSession = kiosk.openVoiceSession(listener = voiceListener)
+    voiceSession?.start()
+}
+
+suspend fun stopVoiceSession(context: Context) {
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+    voiceSession?.stop()
+    voiceSession = null
+
+    proximityRouter.stop()
+    bluetoothScoManager.disable()
+
+    audioManager.isSpeakerphoneOn = false
+    audioManager.mode = AudioManager.MODE_NORMAL
+
+    focusManager.abandon()
+}
+```

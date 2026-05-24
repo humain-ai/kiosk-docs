@@ -1,0 +1,154 @@
+---
+title: "Svelte"
+description: "Svelte store and KioskChat / KioskVoice components from @humain/kiosk-js/svelte."
+icon: "fire-flame-curved"
+---
+
+import InstallJs from '/snippets/install-js.mdx';
+import SandboxTip from '/snippets/sandbox-tip.mdx';
+import CredentialWarning from '/snippets/credential-warning.mdx';
+
+## Install
+
+<InstallJs />
+
+Import from the Svelte sub-package:
+
+```typescript
+import { createKioskStore, KioskChat, KioskVoice } from "@humain/kiosk-js/svelte"
+```
+
+<SandboxTip />
+
+## The store
+
+`createKioskStore` returns a Svelte-compatible readable store with session state and methods.
+
+```svelte
+<script lang="ts">
+  import { onDestroy } from "svelte"
+  import { createKioskStore } from "@humain/kiosk-js/svelte"
+
+  const kiosk = createKioskStore({
+    credential: "hk_live_your_credential_here",
+    mode: "sandbox",
+  })
+
+  let messages: Array<{ role: string; content: string }> = []
+  let input = ""
+
+  onDestroy(() => kiosk.close())
+
+  async function send() {
+    const text = input.trim()
+    if (!text) return
+    input = ""
+    messages = [...messages, { role: "user", content: text }]
+
+    let buffer = ""
+    messages = [...messages, { role: "assistant", content: "" }]
+
+    for await (const event of kiosk.stream(text)) {
+      if (event.type === "chunk") {
+        buffer += event.content
+        messages[messages.length - 1] = { role: "assistant", content: buffer }
+        messages = messages // trigger reactivity
+      }
+    }
+  }
+</script>
+
+{#if $kiosk.status === "idle"}
+  <button on:click={kiosk.open}>Start chat</button>
+{:else if $kiosk.status === "open"}
+  <div class="messages">
+    {#each messages as msg}
+      <div class={msg.role}>{msg.content}</div>
+    {/each}
+  </div>
+  <input bind:value={input} on:keydown={(e) => e.key === "Enter" && send()} />
+  <button on:click={send}>Send</button>
+  <button on:click={kiosk.close}>End</button>
+{/if}
+```
+
+### Store shape
+
+| Property / method | Type | Description |
+|---|---|---|
+| `$kiosk.status` | `SessionStatus` | `"idle"` \| `"opening"` \| `"open"` \| `"closing"` \| `"error"` |
+| `$kiosk.error` | `KioskError \| null` | Most recent error |
+| `kiosk.open()` | `() => Promise<void>` | Open a session |
+| `kiosk.close()` | `() => Promise<void>` | Close the session |
+| `kiosk.send(input)` | `(string) => Promise<MessageResponse>` | Send and await full response |
+| `kiosk.stream(input)` | `(string) => AsyncIterable<StreamEvent>` | Send and stream chunks |
+
+## Drop-in components
+
+### `<KioskChat>`
+
+```svelte
+<script>
+  import { KioskChat } from "@humain/kiosk-js/svelte"
+</script>
+
+<KioskChat
+  credential="hk_live_your_credential_here"
+  mode="sandbox"
+  placeholder="Ask me anything…"
+  on:message={(e) => console.log("User:", e.detail)}
+  on:response={(e) => console.log("AI:", e.detail)}
+/>
+```
+
+### `<KioskVoice>`
+
+```svelte
+<script>
+  import { KioskVoice } from "@humain/kiosk-js/svelte"
+</script>
+
+<KioskVoice
+  credential="hk_live_your_credential_here"
+  mode="sandbox"
+  on:transcript={(e) => console.log("Heard:", e.detail)}
+  on:response={(e) => console.log("AI:", e.detail)}
+/>
+```
+
+## Advanced topics
+
+<AccordionGroup>
+  <Accordion title="SvelteKit usage">
+    Svelte components that use `createKioskStore` or browser APIs cannot run during server-side
+    rendering. Wrap them in a dynamic import with `ssr: false`:
+
+    ```svelte
+    <script>
+      import { onMount } from "svelte"
+      let KioskChat
+
+      onMount(async () => {
+        const mod = await import("@humain/kiosk-js/svelte")
+        KioskChat = mod.KioskChat
+      })
+    </script>
+
+    <svelte:component this={KioskChat} credential="hk_live_…" />
+    ```
+
+    Or use SvelteKit's `browser` guard:
+
+    ```typescript
+    // +page.svelte
+    import { browser } from "$app/environment"
+
+    if (browser) {
+      const { createKioskStore } = await import("@humain/kiosk-js/svelte")
+      // use store here
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<CredentialWarning />

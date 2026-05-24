@@ -1,0 +1,140 @@
+---
+title: "Voice on mobile"
+description: "Platform-agnostic concepts for WebRTC voice sessions on iOS and Android — VAD, barge-in, interruptions, and performance."
+icon: "microphone"
+---
+
+This page explains how the Humain voice pipeline behaves on mobile devices. The concepts here
+apply to both iOS and Android. For platform-specific setup — AVAudioSession, AudioManager,
+permission handling — see the [iOS guide](/mobile/ios-swift) and
+[Android guide](/mobile/android-kotlin).
+
+The WebRTC protocol underlying the voice session is documented in the
+[WebRTC connection guide](/connections/webrtc-voice).
+
+---
+
+## VAD behaviour
+
+Voice Activity Detection (VAD) runs **server-side**. Your app streams a continuous audio
+capture to the Humain server — you do not implement push-to-talk or silence detection.
+
+The server:
+1. Receives the raw audio stream
+2. Detects when the user starts speaking
+3. Detects end-of-utterance after **600 ms of silence**
+4. Sends the accumulated audio to Deepgram STT
+5. Sends the transcript to the LLM
+6. Streams TTS audio back to the device
+
+Your app does not need to know about any of these stages — the SDK abstracts them via the
+`VoiceStatus` / `VoiceStatus` enum and the delegate/listener callbacks.
+
+<Note>
+  The VAD sensitivity (silence threshold) is configured per kiosk in the admin panel under
+  **Kiosk → Voice settings → VAD sensitivity**. There is no per-session API to override it.
+</Note>
+
+---
+
+## Barge-in
+
+Barge-in allows the user to interrupt the AI while it is speaking. When the server detects
+user speech during TTS playback:
+
+1. The TTS audio stream is cancelled immediately
+2. The captured speech is processed as a new turn
+3. The `VoiceStatus` transitions: `speaking` → `listening` → `processing`
+
+**Developers do not need to implement barge-in.** The SDK handles:
+- Cancelling the current audio playback
+- Resuming microphone capture
+- Notifying the delegate/listener of the status change
+
+The `didTranscribe` / `onTranscript` callback fires with the barge-in text, allowing you to
+update the UI to show what the user said.
+
+---
+
+## Network interruptions
+
+Brief network drops (under 5 seconds) are handled transparently:
+
+1. The SDK detects the WebRTC connection drop via `ICE connection state change`
+2. ICE restarts automatically using the existing session credentials
+3. If reconnection succeeds within 5 seconds, the session resumes — **no server state is
+   lost**; conversation history is preserved
+4. The delegate/listener receives `status: .connecting` / `VoiceStatus.CONNECTING` during
+   reconnection
+5. If reconnection fails after 5 seconds, `didFailWith error:` / `onError()` is called with
+   a `networkError`
+
+Your app should:
+- Show a reconnecting indicator when status is `.connecting`
+- Offer a "Retry" button when `didFailWith` / `onError` fires with a network error
+- Call `startSession()` again to open a new session after a hard failure
+
+---
+
+## Background behaviour
+
+<Tabs>
+  <Tab title="iOS">
+    By default, iOS suspends all app threads when the app moves to the background — the voice
+    session stops capturing and streaming audio.
+
+    To keep a voice session alive in the background:
+    1. Add the **Audio, AirPlay, and Picture in Picture** background mode capability in Xcode
+    2. Activate `AVAudioSession` before the session starts (see [iOS audio session](/mobile/audio-session-ios))
+
+    With the background audio capability, the `AVAudioSession` remains active and the voice
+    session continues while the app is backgrounded. This is appropriate for AI assistant apps
+    where a conversation must not be interrupted by the user switching apps briefly.
+
+    Without the capability, the session pauses on backgrounding and resumes on foreground —
+    the server preserves session state for up to 30 minutes.
+  </Tab>
+  <Tab title="Android">
+    Android does not suspend apps as aggressively as iOS, but the OS may kill background
+    processes under memory pressure.
+
+    To keep a voice session reliably alive:
+    1. Run the voice session in a **Foreground Service** with `foregroundServiceType="microphone"`
+    2. Display a persistent notification while the session is active
+
+    ```kotlin
+    // AndroidManifest.xml
+    <service
+        android:name=".VoiceForegroundService"
+        android:foregroundServiceType="microphone"
+        android:exported="false" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    ```
+
+    Without a foreground service, Android may terminate the voice session when the app is
+    backgrounded — the server preserves session state for up to 30 minutes, so the user can
+    return and continue the conversation.
+  </Tab>
+</Tabs>
+
+---
+
+## Battery and performance
+
+| Factor | Detail |
+|---|---|
+| Audio codec | Device hardware audio encoder — minimal CPU overhead |
+| Typical battery impact | ~2–3% per hour of continuous voice session |
+| WebRTC bandwidth | ~32–50 kbps (Opus, adaptive bitrate) |
+| Background CPU | < 5% on a modern device when no speech is detected |
+
+The SDK uses the device's hardware audio codec via `AVAudioEngine` (iOS) or `AudioRecord`
+(Android). The WebRTC stack encodes to Opus at 16 kbps during silence and up to 40 kbps
+during speech.
+
+To minimise battery consumption for long-running deployments (kiosk terminals):
+- Keep the device plugged in
+- Disable screen auto-lock when a session is active (`UIApplication.shared.isIdleTimerDisabled = true` on iOS; `WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON` on Android)
+- Use a wired headset or built-in speaker rather than Bluetooth (Bluetooth SCO draws ~30% more power than wired audio)

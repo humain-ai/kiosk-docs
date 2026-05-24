@@ -1,0 +1,355 @@
+---
+title: "Go"
+description: "Idiomatic Go SDK for Humain Kiosk — context-aware, goroutine-safe, with streaming support."
+icon: "code"
+---
+
+import SdkSandboxNote from '/snippets/sdk-sandbox-note.mdx';
+import SdkCredentialEnv from '/snippets/sdk-credential-env.mdx';
+
+## Install
+
+```bash
+go get github.com/humain/kiosk-go
+```
+
+Requires Go 1.21+. No third-party dependencies beyond the Go standard library.
+
+<SdkSandboxNote />
+
+---
+
+## Quick start
+
+<Tabs>
+  <Tab title="Text session">
+    Open a session, send a message, receive the complete response.
+
+    ```go
+    package main
+
+    import (
+        "context"
+        "fmt"
+        "log"
+
+        kiosk "github.com/humain/kiosk-go"
+    )
+
+    func main() {
+        client := kiosk.New(kiosk.Config{
+            Credential: "hk_live_your_credential_here",
+        })
+
+        ctx := context.Background()
+
+        session, err := client.OpenSession(ctx, kiosk.SessionOptions{})
+        if err != nil {
+            log.Fatal(err)
+        }
+        defer session.Close(ctx)
+
+        resp, err := session.Message(ctx, "What are your opening hours?")
+        if err != nil {
+            log.Fatal(err)
+        }
+
+        fmt.Println(resp.Text)
+        fmt.Println("Actions called:", resp.ActionsCalled)
+    }
+    ```
+  </Tab>
+  <Tab title="Streaming session">
+    Receive tokens as they arrive. Iterate with `stream.Next()` until `io.EOF`.
+
+    ```go
+    package main
+
+    import (
+        "context"
+        "fmt"
+        "io"
+        "log"
+
+        kiosk "github.com/humain/kiosk-go"
+    )
+
+    func main() {
+        client := kiosk.New(kiosk.Config{
+            Credential: "hk_live_your_credential_here",
+        })
+
+        ctx := context.Background()
+
+        session, err := client.OpenSession(ctx, kiosk.SessionOptions{})
+        if err != nil {
+            log.Fatal(err)
+        }
+        defer session.Close(ctx)
+
+        stream, err := session.Stream(ctx, "Tell me about your services")
+        if err != nil {
+            log.Fatal(err)
+        }
+
+        fmt.Print("Assistant: ")
+        for {
+            event, err := stream.Next()
+            if err == io.EOF {
+                break
+            }
+            if err != nil {
+                log.Fatal(err)
+            }
+            if event.Type == kiosk.EventChunk {
+                fmt.Print(event.Content)
+            }
+        }
+        fmt.Println()
+    }
+    ```
+
+    Stream event types:
+
+    | `event.Type` constant | Description |
+    |---|---|
+    | `kiosk.EventTurnStart` | The AI has started generating |
+    | `kiosk.EventChunk` | A token fragment — read `event.Content` |
+    | `kiosk.EventToolCall` | An action endpoint was invoked — read `event.Name`, `event.CallID` |
+    | `kiosk.EventToolResult` | Action endpoint returned — read `event.CallID`, `event.Status` |
+    | `kiosk.EventTurnEnd` | Generation complete — read `event.MessageCount` |
+  </Tab>
+</Tabs>
+
+---
+
+## Client configuration
+
+```go
+client := kiosk.New(kiosk.Config{
+    Credential: "hk_live_your_credential_here",
+    Mode:       kiosk.ModeLive,       // or kiosk.ModeSandbox
+    Timeout:    30 * time.Second,
+    MaxRetries: 2,
+})
+```
+
+<ParamField body="Credential" type="string" required>
+  Your device credential token in `hk_live_…` format. Issue credentials from the Humain
+  admin panel under **Kiosk → Credentials → Issue new credential**.
+</ParamField>
+
+<ParamField body="Mode" type="kiosk.Mode" default="kiosk.ModeLive">
+  `kiosk.ModeSandbox` returns instant stub responses without consuming AI credits. Use
+  `kiosk.ModeLive` for production.
+</ParamField>
+
+<ParamField body="Timeout" type="time.Duration" default="30s">
+  Context deadline applied to each HTTP request. The caller's `context.Context` deadline
+  takes precedence if shorter.
+</ParamField>
+
+<ParamField body="MaxRetries" type="int" default="2">
+  Number of automatic retries on `503 PROVIDER_ERROR`. Uses exponential back-off starting
+  at 1 second.
+</ParamField>
+
+<ParamField body="BaseURL" type="string">
+  Override the API base URL. Defaults to `https://api.humain.ai`.
+</ParamField>
+
+---
+
+## Session options
+
+```go
+session, err := client.OpenSession(ctx, kiosk.SessionOptions{
+    Mode:     kiosk.SessionModeText,  // default
+    Metadata: map[string]string{
+        "user_id": "usr_123",
+    },
+})
+```
+
+<ParamField body="Mode" type="kiosk.SessionMode" default="kiosk.SessionModeText">
+  Session mode. Only `kiosk.SessionModeText` is supported by the SDK — voice sessions
+  require raw WebRTC or a VoIP integration.
+</ParamField>
+
+<ParamField body="Metadata" type="map[string]string">
+  Arbitrary key-value pairs attached to the session. Available in your kiosk's action
+  endpoints as `session.metadata`.
+</ParamField>
+
+---
+
+## Error handling
+
+The SDK returns typed errors you can check with `errors.As`:
+
+```go
+import (
+    "errors"
+    "fmt"
+    "time"
+
+    kiosk "github.com/humain/kiosk-go"
+)
+
+resp, err := session.Message(ctx, "Hello")
+if err != nil {
+    var rateLimitErr *kiosk.RateLimitError
+    var providerErr  *kiosk.ProviderError
+
+    switch {
+    case errors.As(err, &rateLimitErr):
+        fmt.Printf("Rate limited — retry after %v\n", rateLimitErr.RetryAfter)
+        time.Sleep(rateLimitErr.RetryAfter)
+
+    case errors.As(err, &providerErr):
+        if providerErr.Retryable {
+            fmt.Println("Provider unavailable — retryable")
+        }
+
+    default:
+        log.Fatal(err)
+    }
+}
+```
+
+**`*kiosk.RateLimitError` fields:**
+
+<ParamField body="RetryAfter" type="time.Duration">
+  Minimum wait before the next request. Derived from the `Retry-After` response header.
+</ParamField>
+
+**`*kiosk.ProviderError` fields:**
+
+<ParamField body="Retryable" type="bool">
+  `true` if the error is transient and safe to retry with exponential back-off.
+</ParamField>
+
+<ParamField body="StatusCode" type="int">
+  The HTTP status code returned by the API (typically `503`).
+</ParamField>
+
+---
+
+## Concurrent sessions
+
+`*kiosk.Client` is safe to use from multiple goroutines. Each `OpenSession` call creates an
+independent server-side session.
+
+<Accordion title="Running multiple sessions concurrently">
+  ```go
+  package main
+
+  import (
+      "context"
+      "fmt"
+      "sync"
+
+      kiosk "github.com/humain/kiosk-go"
+  )
+
+  func main() {
+      client := kiosk.New(kiosk.Config{
+          Credential: os.Getenv("HUMAIN_CREDENTIAL"),
+      })
+
+      questions := []string{
+          "What are your opening hours?",
+          "Do you offer refunds?",
+          "Where are you located?",
+      }
+
+      results := make([]string, len(questions))
+      var wg sync.WaitGroup
+
+      for i, q := range questions {
+          wg.Add(1)
+          go func(i int, q string) {
+              defer wg.Done()
+
+              ctx := context.Background()
+              session, err := client.OpenSession(ctx, kiosk.SessionOptions{})
+              if err != nil {
+                  results[i] = fmt.Sprintf("error: %v", err)
+                  return
+              }
+              defer session.Close(ctx)
+
+              resp, err := session.Message(ctx, q)
+              if err != nil {
+                  results[i] = fmt.Sprintf("error: %v", err)
+                  return
+              }
+              results[i] = resp.Text
+          }(i, q)
+      }
+
+      wg.Wait()
+
+      for i, q := range questions {
+          fmt.Printf("Q: %s\nA: %s\n\n", q, results[i])
+      }
+  }
+  ```
+</Accordion>
+
+<Accordion title="Using with net/http servers">
+  Create the client once at server startup and close sessions in a deferred call or after
+  each HTTP handler completes.
+
+  ```go
+  package main
+
+  import (
+      "encoding/json"
+      "net/http"
+      "os"
+
+      kiosk "github.com/humain/kiosk-go"
+  )
+
+  var kioskClient *kiosk.Client
+
+  func init() {
+      kioskClient = kiosk.New(kiosk.Config{
+          Credential: os.Getenv("HUMAIN_CREDENTIAL"),
+      })
+  }
+
+  func chatHandler(w http.ResponseWriter, r *http.Request) {
+      var body struct{ Message string `json:"message"` }
+      if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+          http.Error(w, "bad request", http.StatusBadRequest)
+          return
+      }
+
+      session, err := kioskClient.OpenSession(r.Context(), kiosk.SessionOptions{})
+      if err != nil {
+          http.Error(w, "could not open session", http.StatusServiceUnavailable)
+          return
+      }
+      defer session.Close(r.Context())
+
+      resp, err := session.Message(r.Context(), body.Message)
+      if err != nil {
+          http.Error(w, err.Error(), http.StatusInternalServerError)
+          return
+      }
+
+      json.NewEncoder(w).Encode(map[string]string{"response": resp.Text})
+  }
+
+  func main() {
+      http.HandleFunc("/chat", chatHandler)
+      http.ListenAndServe(":8080", nil)
+  }
+  ```
+</Accordion>
+
+---
+
+<SdkCredentialEnv />

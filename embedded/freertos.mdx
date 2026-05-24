@@ -1,0 +1,185 @@
+---
+title: "FreeRTOS"
+description: "Integrate the Humain Kiosk C library into a FreeRTOS application — heap sizing, task setup, and text/streaming usage."
+icon: "layers"
+---
+
+<Warning>
+  **Voice sessions are not supported on FreeRTOS.** The WebRTC audio pipeline requires a
+  POSIX threading model and ALSA/PulseAudio. FreeRTOS targets support **text sessions and
+  streaming only** — use the Raspberry Pi or embedded Linux guide if you need voice.
+</Warning>
+
+The `kiosk-c` library targets C99 and uses libcurl for HTTP/HTTPS. On FreeRTOS you need a
+network stack that provides a BSD socket layer compatible with libcurl's `curl-for-RTOS` port.
+The [lwIP](https://savannah.nongnu.org/projects/lwip/) + FreeRTOS-Plus-TCP combination is the
+most common choice.
+
+---
+
+## Heap requirements
+
+| Mode | Minimum heap |
+|---|---|
+| Text session (blocking) | 64 KB |
+| Streaming session | 96 KB |
+| libcurl TLS overhead (mbedTLS) | + 64 KB |
+
+Configure `configTOTAL_HEAP_SIZE` in `FreeRTOSConfig.h` accordingly:
+
+```c
+/* FreeRTOSConfig.h */
+#define configTOTAL_HEAP_SIZE    ( ( size_t )( 192 * 1024 ) )
+```
+
+---
+
+## CMakeLists integration
+
+```cmake
+cmake_minimum_required(VERSION 3.22)
+project(my_kiosk_device C)
+
+# FreeRTOS and lwIP are assumed to be in your project already.
+# Add the kiosk-c library as an external dependency:
+include(FetchContent)
+FetchContent_Declare(
+    kiosk_c
+    GIT_REPOSITORY https://github.com/humain/kiosk-c.git
+    GIT_TAG        v1.0.0
+)
+FetchContent_MakeAvailable(kiosk_c)
+
+add_executable(my_kiosk_device main.c voice_task.c)
+target_link_libraries(my_kiosk_device PRIVATE kiosk freertos_kernel lwip mbedtls)
+```
+
+---
+
+## FreeRTOS task example
+
+Run the kiosk client inside a dedicated FreeRTOS task. The task opens a session, processes
+messages, and handles errors.
+
+```c
+#include "FreeRTOS.h"
+#include "task.h"
+#include "kiosk.h"
+#include <stdio.h>
+#include <string.h>
+
+/* Stack size in words (multiply by 4 for bytes on 32-bit MCU) */
+#define KIOSK_TASK_STACK_WORDS  2048
+#define KIOSK_TASK_PRIORITY     3
+
+static kiosk_client_t *s_client = NULL;
+
+/* Streaming callback — called from the kiosk task, not an ISR */
+static int on_chunk(const char *chunk, size_t chunk_len, void *userdata) {
+    (void)userdata;
+    /* Write chunk to your display / UART / message queue here */
+    for (size_t i = 0; i < chunk_len; i++) {
+        putchar(chunk[i]);
+    }
+    fflush(stdout);
+    return 0;
+}
+
+static void kiosk_task(void *pvParameters) {
+    (void)pvParameters;
+
+    /* 1. Create client — credential stored in flash/NVS */
+    const char *credential = getenv("HUMAIN_CREDENTIAL"); /* or read from NVS */
+    kiosk_config_t cfg = {0};
+    cfg.credential  = credential;
+    cfg.timeout_ms  = 20000; /* 20 s — allow for slow links */
+    cfg.max_retries = 5;
+
+    s_client = kiosk_client_create(&cfg);
+    if (!s_client) {
+        /* Fatal — not enough heap. Increase configTOTAL_HEAP_SIZE. */
+        vTaskDelete(NULL);
+        return;
+    }
+
+    for (;;) {
+        /* 2. Open a session */
+        kiosk_session_t *session = NULL;
+        kiosk_error_t err = kiosk_session_open(s_client, KIOSK_SESSION_TEXT, &session);
+        if (err != KIOSK_OK) {
+            printf("Session open failed: %s — retrying in 10s\n", kiosk_error_string(err));
+            vTaskDelay(pdMS_TO_TICKS(10000));
+            continue;
+        }
+
+        /* 3. Conversation loop */
+        char input[128];
+        while (1) {
+            /* Read input from UART, touchscreen, button, or queue */
+            if (xQueueReceive(xInputQueue, input, portMAX_DELAY) != pdPASS) continue;
+
+            printf("AI: ");
+            err = kiosk_session_stream(session, input, on_chunk, NULL);
+            printf("\n");
+
+            if (err == KIOSK_ERR_SESSION_ENDED || err == KIOSK_ERR_NETWORK) {
+                break; /* Exit inner loop — reopen session */
+            }
+        }
+
+        /* 4. Clean up session before reopening */
+        kiosk_session_close(session);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+void start_kiosk_task(void) {
+    xTaskCreate(
+        kiosk_task,
+        "kiosk",
+        KIOSK_TASK_STACK_WORDS,
+        NULL,
+        KIOSK_TASK_PRIORITY,
+        NULL
+    );
+}
+```
+
+<Note>
+  `kiosk_session_stream()` and `kiosk_session_message()` both block the calling task until
+  the operation completes. Run the kiosk task at a priority that lets the TCP/IP and Wi-Fi
+  driver tasks run — typically priority 3 or 4 out of 10.
+</Note>
+
+---
+
+## Task stack sizing
+
+The kiosk task stack must accommodate:
+- The C library's call stack (~4 KB peak)
+- libcurl's internal stack (~6 KB peak)
+- Your application code
+
+Use `uxTaskGetStackHighWaterMark()` after a full conversation to measure actual usage:
+
+```c
+UBaseType_t high_water = uxTaskGetStackHighWaterMark(NULL);
+printf("Stack remaining: %lu words\n", (unsigned long)high_water);
+```
+
+If high water mark is below 256 words, increase `KIOSK_TASK_STACK_WORDS`.
+
+---
+
+## Credential storage on FreeRTOS
+
+Do not store credentials in plain RAM. Use your MCU's non-volatile storage:
+
+| Platform | Recommended storage |
+|---|---|
+| ESP32 | NVS (Non-Volatile Storage) partition |
+| STM32 | Internal flash, last sector |
+| nRF52 | FDS (Flash Data Storage) |
+| Generic | Encrypted external QSPI flash |
+
+See [Credential management](/embedded/credential-management) for provisioning and rotation patterns.

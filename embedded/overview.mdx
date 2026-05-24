@@ -1,0 +1,77 @@
+---
+title: "Embedded devices"
+description: "Run Humain Kiosk on embedded Linux, Raspberry Pi, FreeRTOS, and Zephyr using the C99 library."
+icon: "cpu"
+---
+
+The Humain Kiosk C library (`kiosk-c`) is a C99 client for devices that cannot run a full
+operating system or browser runtime. It wraps the [Device REST API](/connections/rest-text) and
+[WebSocket streaming API](/connections/websocket-streaming) in a minimal, dependency-light interface
+backed by **libcurl**.
+
+All AI processing is server-side. The library sends text or audio to the Humain backend and
+receives responses — the device itself needs no LLM, STT, or TTS capability.
+
+---
+
+## Requirements
+
+| Requirement | Minimum |
+|---|---|
+| C standard | C99 |
+| libcurl | 7.68.0 |
+| TLS | OpenSSL 1.1+ or mbedTLS 2.16+ |
+| RAM (text sessions) | 64 KB available heap |
+| RAM (voice sessions) | 512 KB available heap + audio buffers |
+| Flash / storage | ~180 KB for the static library |
+| Network | TCP/IP with DNS, HTTPS (port 443) |
+
+<Note>
+  Voice sessions require audio capture hardware and ALSA or PulseAudio on Linux. FreeRTOS and
+  Zephyr targets support **text and streaming only** — see the platform guides for details.
+</Note>
+
+---
+
+## Choose your platform
+
+<CardGroup cols={2}>
+  <Card title="C library reference" icon="book" href="/embedded/c-library">
+    Full API reference for `kiosk.h` — configuration, session lifecycle, streaming callback,
+    error codes, and memory model.
+  </Card>
+  <Card title="Raspberry Pi" icon="cpu" href="/embedded/raspberry-pi">
+    Step-by-step guide for Raspberry Pi (arm64, Raspberry Pi OS). Covers build, systemd
+    service, audio routing, and auto-reconnect.
+  </Card>
+  <Card title="FreeRTOS" icon="layers" href="/embedded/freertos">
+    Integrate the kiosk library into a FreeRTOS task. Covers heap sizing, task stack
+    requirements, and text / streaming usage.
+  </Card>
+  <Card title="Zephyr RTOS" icon="zap" href="/embedded/zephyr">
+    Zephyr module integration. Covers Kconfig options, CMakeLists.txt, and a minimal
+    sample application using the Zephyr HTTP client.
+  </Card>
+</CardGroup>
+
+---
+
+## Reference
+
+<CardGroup cols={2}>
+  <Card title="Audio hardware" icon="microphone" href="/embedded/audio-hardware">
+    Microphone and speaker selection guide for kiosk terminals — USB, I²S, MEMS, and
+    analogue options with STT accuracy notes.
+  </Card>
+  <Card title="Credential management" icon="key" href="/embedded/credential-management">
+    Secure credential storage on embedded targets — environment files, dm-crypt,
+    ATECC608 secure element, and TPM 2.0.
+  </Card>
+  <Card title="OTA updates" icon="upload" href="/embedded/ota-updates">
+    Keeping the library and firmware up to date with SWUpdate, Mender, and Balena Cloud.
+    Includes credential preservation across updates.
+  </Card>
+  <Card title="C library (GitHub)" icon="github" href="https://github.com/humain/kiosk-c">
+    Source, CMakeLists, toolchain files, and pre-built release binaries for common targets.
+  </Card>
+</CardGroup>

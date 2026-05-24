@@ -1,0 +1,276 @@
+---
+title: "Python"
+description: "asyncio-first Python SDK for Humain Kiosk — text sessions, streaming, and error handling."
+icon: "python"
+---
+
+import SdkSandboxNote from '/snippets/sdk-sandbox-note.mdx';
+import SdkCredentialEnv from '/snippets/sdk-credential-env.mdx';
+
+## Install
+
+```bash
+pip install humain-kiosk
+```
+
+Requires Python 3.10+. The SDK has no mandatory dependencies beyond the standard library and
+`httpx` for HTTP transport.
+
+<SdkSandboxNote />
+
+---
+
+## Quick start
+
+<Tabs>
+  <Tab title="Text session">
+    Send a message and receive the complete AI response before returning.
+
+    ```python
+    import asyncio
+    from humain_kiosk import KioskClient
+
+    async def main():
+        client = KioskClient(credential="hk_live_your_credential_here")
+
+        async with client.session() as session:
+            response = await session.message("What are your opening hours?")
+            print(response.text)
+
+    asyncio.run(main())
+    ```
+  </Tab>
+  <Tab title="Streaming session">
+    Receive tokens as they are generated. Use `async for` over `session.stream()`.
+
+    ```python
+    import asyncio
+    from humain_kiosk import KioskClient
+
+    async def main():
+        client = KioskClient(credential="hk_live_your_credential_here")
+
+        async with client.session() as session:
+            print("Assistant: ", end="")
+            async for event in session.stream("Tell me about your services"):
+                if event.type == "chunk":
+                    print(event.content, end="", flush=True)
+            print()
+
+    asyncio.run(main())
+    ```
+
+    Stream events:
+
+    | `event.type` | Extra fields | Description |
+    |---|---|---|
+    | `"turn_start"` | — | The AI has started generating |
+    | `"chunk"` | `content: str` | A token fragment — append to output |
+    | `"tool_call"` | `name`, `call_id` | An action endpoint was invoked |
+    | `"tool_result"` | `call_id`, `status` | Action endpoint returned |
+    | `"turn_end"` | `message_count: int` | Generation complete |
+  </Tab>
+</Tabs>
+
+---
+
+## Client configuration
+
+```python
+from humain_kiosk import KioskClient
+
+client = KioskClient(
+    credential="hk_live_your_credential_here",
+    mode="sandbox",     # "live" in production
+    timeout=30,
+    max_retries=2,
+)
+```
+
+<ParamField body="credential" type="string" required>
+  Your device credential token in `hk_live_…` format. Issue credentials from the Humain
+  admin panel under **Kiosk → Credentials → Issue new credential**.
+</ParamField>
+
+<ParamField body="mode" type='"live" | "sandbox"' default="live">
+  `"sandbox"` returns instant stub responses without consuming AI credits. Switch to
+  `"live"` for production.
+</ParamField>
+
+<ParamField body="timeout" type="int" default="30">
+  Request timeout in seconds. Applies to both the session open call and each message call.
+</ParamField>
+
+<ParamField body="max_retries" type="int" default="2">
+  Number of automatic retries on `503 PROVIDER_ERROR` responses. Uses exponential back-off
+  starting at 1 second.
+</ParamField>
+
+<ParamField body="base_url" type="str">
+  Override the API base URL. Defaults to `https://api.humain.ai`. Useful for testing against
+  a local proxy or staging environment.
+</ParamField>
+
+---
+
+## Session lifecycle
+
+The `client.session()` context manager opens the session on entry and closes it on exit —
+even if an exception is raised.
+
+```python
+async with client.session(mode="text") as session:
+    response = await session.message("Hello")
+    print(response.text)
+    print(response.actions_called)   # list[str] — action endpoints invoked this turn
+# Session is automatically closed here
+```
+
+For explicit lifecycle control:
+
+```python
+session = await client.open_session(mode="text")
+try:
+    response = await session.message("Hello")
+    print(response.text)
+finally:
+    await session.close()
+```
+
+---
+
+## Error handling
+
+```python
+import asyncio
+from humain_kiosk import KioskClient, RateLimitError, ProviderError, AuthenticationError
+
+async def main():
+    client = KioskClient(credential="hk_live_your_credential_here")
+
+    async with client.session() as session:
+        try:
+            response = await session.message("Hello")
+            print(response.text)
+        except RateLimitError as e:
+            print(f"Rate limited — retry after {e.retry_after}s")
+            await asyncio.sleep(e.retry_after)
+        except ProviderError as e:
+            if e.retryable:
+                print("Provider temporarily unavailable — will retry")
+        except AuthenticationError:
+            print("Invalid or revoked credential")
+
+asyncio.run(main())
+```
+
+Error types:
+
+| Exception | Inherits | Cause | Extra attributes |
+|---|---|---|---|
+| `KioskError` | `Exception` | Base class for all SDK errors | `code: str`, `message: str` |
+| `AuthenticationError` | `KioskError` | `401` — invalid or revoked credential | — |
+| `RateLimitError` | `KioskError` | `429` — too many requests | `retry_after: float` (seconds) |
+| `ProviderError` | `KioskError` | `503` — LLM unavailable | `retryable: bool` |
+| `SessionEndedError` | `KioskError` | Session already closed | — |
+
+---
+
+## Multi-turn conversation
+
+Conversation history is managed server-side. You do not pass previous messages with each
+request — just send the next user input.
+
+```python
+async def conversation_loop(client: KioskClient):
+    async with client.session() as session:
+        while True:
+            user_input = input("You: ").strip()
+            if user_input.lower() in ("quit", "exit", ""):
+                break
+
+            response = await session.message(user_input)
+            print(f"Assistant: {response.text}")
+```
+
+<Note>
+  The session maintains the full conversation context server-side. The only state you need to
+  track locally is what to display in your UI.
+</Note>
+
+---
+
+## FastAPI integration
+
+<Accordion title="Using with FastAPI">
+  Create a single `KioskClient` at startup and share it across requests. Each request opens
+  its own session through the shared client.
+
+  ```python
+  from contextlib import asynccontextmanager
+  import os
+  from fastapi import FastAPI
+  from humain_kiosk import KioskClient
+
+  client: KioskClient | None = None
+
+  @asynccontextmanager
+  async def lifespan(app: FastAPI):
+      global client
+      client = KioskClient(credential=os.environ["HUMAIN_CREDENTIAL"])
+      yield
+      # KioskClient has no explicit teardown, but you can add cleanup here
+
+  app = FastAPI(lifespan=lifespan)
+
+  @app.post("/chat")
+  async def chat(message: str):
+      async with client.session() as session:
+          response = await session.message(message)
+          return {"response": response.text}
+
+  @app.post("/chat/stream")
+  async def chat_stream(message: str):
+      from fastapi.responses import StreamingResponse
+
+      async def generate():
+          async with client.session() as session:
+              async for event in session.stream(message):
+                  if event.type == "chunk":
+                      yield event.content
+
+      return StreamingResponse(generate(), media_type="text/plain")
+  ```
+</Accordion>
+
+<Accordion title="Running concurrent sessions">
+  `KioskClient` is safe to share across coroutines. Each `client.session()` call opens an
+  independent session on the server.
+
+  ```python
+  import asyncio
+  from humain_kiosk import KioskClient
+
+  async def answer(client: KioskClient, question: str) -> str:
+      async with client.session() as session:
+          response = await session.message(question)
+          return response.text
+
+  async def main():
+      client = KioskClient(credential=os.environ["HUMAIN_CREDENTIAL"])
+      questions = [
+          "What are your opening hours?",
+          "Do you offer refunds?",
+          "Where are you located?",
+      ]
+      answers = await asyncio.gather(*[answer(client, q) for q in questions])
+      for q, a in zip(questions, answers):
+          print(f"Q: {q}\nA: {a}\n")
+
+  asyncio.run(main())
+  ```
+</Accordion>
+
+---
+
+<SdkCredentialEnv />

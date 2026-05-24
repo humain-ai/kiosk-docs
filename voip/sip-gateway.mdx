@@ -1,0 +1,153 @@
+---
+title: "SIP gateway"
+description: "Connect any SIP-capable device or PBX directly to the Humain SIP gateway — no proprietary client required."
+icon: "network-wired"
+---
+
+import VoipCredentialNote from '/snippets/voip-credential-note.mdx';
+
+The Humain SIP gateway accepts inbound SIP `INVITE`s from any standards-compliant SIP endpoint.
+If your device or PBX speaks SIP, you can connect it without installing a plugin or writing
+custom code.
+
+<VoipCredentialNote />
+
+---
+
+## Connection details
+
+| Parameter | Value |
+|---|---|
+| SIP server | `sip.humain.ai` |
+| Port (UDP/TCP) | `5060` |
+| Port (TLS) | `5061` |
+| Transport (production) | TLS required |
+| SIP username | Your kiosk credential prefix (the part before `@`, typically `hk_live_…`) |
+| SIP password | Your full `hk_live_…` credential token |
+| Supported codecs | G.711 PCMU, G.711 PCMA, G.722, Opus |
+
+<Warning>
+  Use TLS (port 5061) in production. UDP and plain TCP connections transmit your credential
+  token in the `Authorization` header unencrypted. Plain SIP on port 5060 is accepted only
+  for local testing.
+</Warning>
+
+---
+
+## Configuration examples
+
+<CodeGroup>
+```text Generic softphone (SIP URI)
+# Register this URI in any SIP softphone or ATA
+sip:hk_live_YOUR_TOKEN@sip.humain.ai
+
+# Example with explicit transport
+sip:hk_live_YOUR_TOKEN@sip.humain.ai;transport=tls
+```
+
+```ini Asterisk PJSIP trunk (pjsip.conf)
+; /etc/asterisk/pjsip.conf
+
+[humain-auth]
+type=auth
+auth_type=userpass
+username=hk_live_YOUR_TOKEN
+password=hk_live_YOUR_TOKEN
+
+[humain-aor]
+type=aor
+contact=sip:sip.humain.ai:5061
+
+[humain-endpoint]
+type=endpoint
+transport=transport-tls
+outbound_auth=humain-auth
+aors=humain-aor
+from_user=hk_live_YOUR_TOKEN
+from_domain=sip.humain.ai
+dtmf_mode=rfc4733
+allow=!all,ulaw,alaw,g722
+
+[humain-trunk]
+type=registration
+outbound_auth=humain-auth
+server_uri=sip:sip.humain.ai:5061
+client_uri=sip:hk_live_YOUR_TOKEN@sip.humain.ai:5061
+retry_interval=60
+```
+
+```ini FreeSWITCH gateway (sofia.conf.xml)
+<!-- /etc/freeswitch/sip_profiles/external/humain.xml -->
+<gateway name="humain">
+  <param name="username"   value="hk_live_YOUR_TOKEN"/>
+  <param name="password"   value="hk_live_YOUR_TOKEN"/>
+  <param name="realm"      value="sip.humain.ai"/>
+  <param name="proxy"      value="sip.humain.ai:5061"/>
+  <param name="register"   value="true"/>
+  <param name="transport"  value="tls"/>
+  <param name="caller-id-in-from" value="false"/>
+</gateway>
+```
+
+```bash SIPp smoke test
+# Quick connectivity test — sends one call, records media, hangs up after 10 s
+sipp sip.humain.ai:5061 \
+  -sf uac.xml \
+  -au hk_live_YOUR_TOKEN \
+  -ap hk_live_YOUR_TOKEN \
+  -d 10000 \
+  -r 1 \
+  -tls-cert client.pem \
+  -tls-key client.key
+```
+</CodeGroup>
+
+---
+
+## Dialplan routing (Asterisk example)
+
+Once the trunk is registered, route inbound calls to it from your dialplan:
+
+```ini
+; /etc/asterisk/extensions.conf
+[from-humain]
+; Calls arriving from Humain (outbound AI-initiated sessions)
+exten => s,1,NoOp(Inbound from Humain AI)
+ same => n,Answer()
+ same => n,Playback(silence/1)
+ same => n,Hangup()
+
+[to-humain]
+; Route an inbound PSTN call to the Humain AI
+exten => _X.,1,NoOp(Routing ${EXTEN} to Humain Kiosk)
+ same => n,Answer()
+ same => n,Dial(PJSIP/${EXTEN}@humain-endpoint,60,gH)
+ same => n,Hangup()
+```
+
+---
+
+## Verifying registration
+
+After applying configuration, check that the trunk has registered:
+
+<CodeGroup>
+```bash Asterisk
+asterisk -rx "pjsip show registrations"
+# Look for humain-trunk with Status: Registered
+```
+
+```bash FreeSWITCH
+fs_cli -x "sofia status gateway humain"
+# Look for State: REGED
+```
+</CodeGroup>
+
+---
+
+## NAT traversal
+
+If your PBX is behind NAT, set the `Contact` header to your public IP in your SIP client
+configuration. The Humain gateway does not perform STUN or ICE for the SIP leg — NAT traversal
+is handled at your edge. For the media (RTP) leg, ensure ports 10000–20000 UDP are open
+outbound.

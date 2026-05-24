@@ -1,0 +1,118 @@
+---
+title: "Session modes"
+description: "Choose the right interaction mode for your channel: text for REST and streaming, voice for real-time WebRTC audio, voip for telephony."
+---
+
+The `mode` field in `POST /v1/sessions` determines which interaction patterns are available for the
+life of that session. You cannot change mode mid-session — open a new session if you need to switch.
+
+<Tabs>
+  <Tab title="text">
+    ## Text mode
+
+    The default mode. Suitable for chat interfaces, kiosk touchscreens, and any channel where you
+    exchange typed messages.
+
+    **Available endpoints:**
+    - `POST /v1/sessions/{sid}/message` — synchronous: send input, wait for complete response.
+    - `GET /v1/sessions/{sid}/stream` — WebSocket: send input, receive tokens as they are generated.
+
+    **When to use:**
+    - Chat widgets embedded in websites or apps.
+    - Kiosk touchscreens where users type or tap.
+    - Server-to-server integrations where streaming latency is not critical.
+    - Any context where audio is unavailable or undesirable.
+
+    ```bash
+    # Open a text session
+    curl -X POST https://api.humain.ai/v1/sessions \
+      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"mode":"text"}'
+    ```
+
+    <Note>
+      For the lowest perceived latency in a chat UI, use WebSocket streaming mode so tokens
+      appear as they are generated rather than waiting for the full response.
+    </Note>
+  </Tab>
+  <Tab title="voice">
+    ## Voice mode
+
+    Real-time audio over WebRTC. The AI speaks and listens using Opus-encoded audio frames. The
+    server runs speech-to-text (Deepgram), LLM inference, and text-to-speech (ElevenLabs) in a
+    single streaming pipeline.
+
+    **Available endpoints:**
+    - `POST /v1/sessions/{sid}/webrtc/offer` — exchange SDP offer/answer.
+    - `POST /v1/sessions/{sid}/webrtc/ice` — submit ICE candidates.
+
+    **Voice pipeline behaviour:**
+    - **Server-side VAD** — silence is detected server-side after 600 ms. You do not need to
+      send explicit end-of-utterance signals.
+    - **Barge-in** — the user can speak while the AI is responding. The AI stops mid-sentence
+      and processes the interruption.
+    - **Codec** — Opus, 48 kHz, mono.
+
+    **When to use:**
+    - Drive-through ordering systems.
+    - Hotel room assistants where the user never touches a screen.
+    - Any hands-free scenario.
+
+    ```bash
+    # Open a voice session (WebRTC negotiation follows)
+    curl -X POST https://api.humain.ai/v1/sessions \
+      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"mode":"voice"}'
+    ```
+
+    <Warning>
+      Voice mode requires a WebRTC-capable runtime. Web browsers support this natively.
+      For server-side or embedded use, integrate [pion/webrtc](https://github.com/pion/webrtc)
+      (Go) or [aiortc](https://github.com/aiortc/aiortc) (Python).
+    </Warning>
+  </Tab>
+  <Tab title="voip">
+    ## VoIP mode
+
+    Bridges a SIP or PSTN telephone call to the Humain AI. Audio travels over the existing VoIP
+    infrastructure — the Humain API handles transcription, inference, and synthesis on the server.
+
+    **When to use:**
+    - Call centre overflow where live agents are unavailable.
+    - After-hours phone support.
+    - IVR replacement with a natural-language AI front-end.
+
+    **Integration paths:**
+    - **SIP trunk** — configure your PBX (Asterisk, FreeSWITCH, Twilio Elastic SIP) to send calls
+      to the Humain SIP endpoint.
+    - **VoIP adapter** — use a hardware ATA (Analog Telephone Adapter) to connect a physical phone
+      line.
+
+    ```bash
+    # Open a voip session
+    curl -X POST https://api.humain.ai/v1/sessions \
+      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"mode":"voip"}'
+    ```
+
+    <Info>
+      VoIP mode is configured in the admin panel under **Kiosk → Voice settings**. See the
+      [VoIP connection guide](/connections/voip-sip) for full setup instructions.
+    </Info>
+  </Tab>
+</Tabs>
+
+## Mode comparison
+
+| Feature | text | voice | voip |
+|---|---|---|---|
+| REST messaging | ✅ | — | — |
+| WebSocket streaming | ✅ | — | — |
+| WebRTC audio | — | ✅ | — |
+| SIP / PSTN | — | — | ✅ |
+| Server-side VAD | — | ✅ | ✅ |
+| Barge-in support | — | ✅ | ✅ |
+| Requires browser / WebRTC runtime | No | Yes | No |

@@ -1,0 +1,290 @@
+---
+title: "React"
+description: "KioskChat, KioskVoice, and useKioskSession — React components and hooks from @humain/kiosk-js/react."
+icon: "atom"
+---
+
+import InstallJs from '/snippets/install-js.mdx';
+import SandboxTip from '/snippets/sandbox-tip.mdx';
+import CredentialWarning from '/snippets/credential-warning.mdx';
+
+## Install
+
+<InstallJs />
+
+Import from the React sub-package:
+
+```typescript
+import { KioskChat, KioskVoice, useKioskSession } from "@humain/kiosk-js/react"
+```
+
+<SandboxTip />
+
+## Usage
+
+<Tabs>
+  <Tab title="Text chat">
+    The `<KioskChat>` component renders a fully-featured chat UI in a single line. Drop it
+    anywhere in your component tree.
+
+    ```tsx
+    import { KioskChat } from "@humain/kiosk-js/react"
+
+    export function SupportWidget() {
+      return (
+        <KioskChat
+          credential="hk_live_your_credential_here"
+          mode="sandbox"
+          onMessage={(msg) => console.log("User said:", msg)}
+          onResponse={(res) => console.log("AI responded:", res)}
+        />
+      )
+    }
+    ```
+
+    ### `<KioskChat>` props
+
+    <ParamField path="credential" type="string" required>
+      Device credential token (`hk_live_…`). Pass via an environment variable — never hardcode
+      in production client bundles.
+    </ParamField>
+
+    <ParamField path="mode" type='"sandbox" | "live"' default='"live"'>
+      Environment. Use `"sandbox"` during development.
+    </ParamField>
+
+    <ParamField path="placeholder" type="string" default='"Type a message…"'>
+      Input field placeholder text.
+    </ParamField>
+
+    <ParamField path="initialMessage" type="string">
+      Message shown in the chat window on first render before the user types anything.
+    </ParamField>
+
+    <ParamField path="className" type="string">
+      CSS class applied to the outermost container — use for sizing and layout.
+    </ParamField>
+
+    <ParamField path="onMessage" type="(message: string) => void">
+      Called each time the user submits a message.
+    </ParamField>
+
+    <ParamField path="onResponse" type="(response: string) => void">
+      Called each time the AI returns a complete response.
+    </ParamField>
+
+    <ParamField path="onError" type="(error: KioskError) => void">
+      Called on any API or network error. The component shows a generic error state by default.
+    </ParamField>
+  </Tab>
+
+  <Tab title="Streaming chat">
+    For full control over the UI, use the `useKioskSession` hook and build your own chat layout.
+    Tokens arrive via an async iterator — update state as each chunk lands.
+
+    ```tsx
+    import { useState } from "react"
+    import { useKioskSession } from "@humain/kiosk-js/react"
+
+    interface Message {
+      role: "user" | "assistant"
+      content: string
+      streaming?: boolean
+    }
+
+    export function StreamingChat() {
+      const { session, status, openSession, closeSession } = useKioskSession({
+        credential: "hk_live_your_credential_here",
+        mode: "sandbox",
+      })
+      const [messages, setMessages] = useState<Message[]>([])
+      const [input, setInput] = useState("")
+
+      const sendMessage = async (text: string) => {
+        if (!session) return
+        setMessages(prev => [...prev, { role: "user", content: text }])
+
+        const chunks: string[] = []
+        for await (const event of session.stream(text)) {
+          if (event.type === "chunk") {
+            chunks.push(event.content)
+            // Replace or append the streaming assistant message
+            setMessages(prev => {
+              const last = prev[prev.length - 1]
+              const updated: Message = {
+                role: "assistant",
+                content: chunks.join(""),
+                streaming: true,
+              }
+              return last?.streaming
+                ? [...prev.slice(0, -1), updated]
+                : [...prev, updated]
+            })
+          }
+          if (event.type === "turn_end") {
+            setMessages(prev =>
+              prev.map((m, i) =>
+                i === prev.length - 1 ? { ...m, streaming: false } : m
+              )
+            )
+          }
+        }
+      }
+
+      return (
+        <div>
+          <p>Status: {status}</p>
+          {status === "idle" && (
+            <button onClick={openSession}>Start conversation</button>
+          )}
+          <div>
+            {messages.map((m, i) => (
+              <div key={i} style={{ textAlign: m.role === "user" ? "right" : "left" }}>
+                <span>{m.content}{m.streaming && "▌"}</span>
+              </div>
+            ))}
+          </div>
+          {status === "open" && (
+            <form onSubmit={e => { e.preventDefault(); sendMessage(input); setInput("") }}>
+              <input value={input} onChange={e => setInput(e.target.value)} />
+              <button type="submit">Send</button>
+            </form>
+          )}
+        </div>
+      )
+    }
+    ```
+
+    ### `useKioskSession` props
+
+    <ParamField path="credential" type="string" required>
+      Device credential token.
+    </ParamField>
+
+    <ParamField path="mode" type='"sandbox" | "live"' default='"live"'>
+      Environment.
+    </ParamField>
+
+    <ParamField path="autoOpen" type="boolean" default="false">
+      Automatically call `openSession()` when the component mounts.
+    </ParamField>
+
+    <ParamField path="onError" type="(error: KioskError) => void">
+      Called on unhandled errors within the session.
+    </ParamField>
+
+    ### `useKioskSession` return values
+
+    <ResponseField name="session" type="Session | null">
+      The active session object, or `null` if no session is open.
+    </ResponseField>
+
+    <ResponseField name="status" type='"idle" | "opening" | "open" | "closing" | "closed" | "error"'>
+      Current session state. Gate your UI on this value.
+    </ResponseField>
+
+    <ResponseField name="openSession" type="() => Promise<void>">
+      Opens a new text session.
+    </ResponseField>
+
+    <ResponseField name="closeSession" type="() => Promise<void>">
+      Closes the current session. Safe to call if no session is open.
+    </ResponseField>
+  </Tab>
+
+  <Tab title="Voice">
+    The `<KioskVoice>` component handles WebRTC negotiation, microphone access, and audio
+    playback for you. It renders a minimal voice UI — a status indicator and a mic button.
+
+    ```tsx
+    import { KioskVoice } from "@humain/kiosk-js/react"
+
+    export function VoiceKiosk() {
+      return (
+        <KioskVoice
+          credential="hk_live_your_credential_here"
+          mode="sandbox"
+          onTranscript={(text) => console.log("Heard:", text)}
+          onResponse={(text) => console.log("AI said:", text)}
+        />
+      )
+    }
+    ```
+
+    ### `<KioskVoice>` props
+
+    <ParamField path="credential" type="string" required>
+      Device credential token.
+    </ParamField>
+
+    <ParamField path="mode" type='"sandbox" | "live"' default='"live"'>
+      Environment.
+    </ParamField>
+
+    <ParamField path="iceServers" type="RTCIceServer[]">
+      TURN/STUN servers for WebRTC NAT traversal. Defaults to Google's public STUN server.
+      Provide your own TURN server for production deployments on restricted networks.
+    </ParamField>
+
+    <ParamField path="onTranscript" type="(text: string) => void">
+      Called with the recognised speech each time the VAD detects end-of-utterance.
+    </ParamField>
+
+    <ParamField path="onResponse" type="(text: string) => void">
+      Called with the AI's response text after TTS synthesis completes.
+    </ParamField>
+
+    <ParamField path="onStatusChange" type="(status: VoiceStatus) => void">
+      Called when the voice session status changes. Status values: `"idle"`, `"connecting"`,
+      `"listening"`, `"processing"`, `"speaking"`, `"error"`.
+    </ParamField>
+
+    <ParamField path="className" type="string">
+      CSS class applied to the wrapper — use to position the component in your layout.
+    </ParamField>
+  </Tab>
+</Tabs>
+
+## Advanced topics
+
+<AccordionGroup>
+  <Accordion title="Next.js usage">
+    Both `<KioskChat>` and `<KioskVoice>` are client components — they use browser APIs
+    (WebSocket, WebRTC, `navigator.mediaDevices`) and cannot run during SSR.
+
+    Add `"use client"` to any file that imports them:
+
+    ```tsx
+    "use client"
+
+    import { KioskChat } from "@humain/kiosk-js/react"
+
+    export function SupportWidget() {
+      return <KioskChat credential={process.env.NEXT_PUBLIC_HUMAIN_CREDENTIAL!} />
+    }
+    ```
+
+    Do **not** instantiate `HumainKioskClient` at module scope in a Server Component — the
+    client constructor accesses `window` and will throw during server render. Instantiate it
+    inside a `useEffect` or inside a Client Component.
+
+    For credentials in Next.js, use `NEXT_PUBLIC_HUMAIN_CREDENTIAL` for client-side usage
+    (sandbox only) or proxy calls through an API route to keep live credentials server-side.
+  </Accordion>
+  <Accordion title="Resetting a session on page navigation">
+    If your app navigates between pages without a full page reload (SPA routing), call
+    `closeSession()` in a cleanup function to avoid leaking sessions:
+
+    ```tsx
+    useEffect(() => {
+      openSession()
+      return () => { closeSession() }
+    }, [])
+    ```
+
+    `useKioskSession` also auto-closes the session when the component unmounts if `autoOpen`
+    is enabled.
+  </Accordion>
+</AccordionGroup>
+
+<CredentialWarning />

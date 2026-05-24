@@ -1,14 +1,38 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "Humain Kiosk",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#1D9E75",
+    "light": "#4fc49a",
+    "dark": "#12614a"
+  },
+  "logo": {
+    "light": "/images/logo-light.svg",
+    "dark": "/images/logo-dark.svg"
   },
   "favicon": "/favicon.svg",
+  "navbar": {
+    "links": [
+      {
+        "label": "Admin panel",
+        "href": "https://app.humain.ai"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Get started",
+      "href": "https://app.humain.ai/register"
+    }
+  },
   "navigation": {
+    "anchors": [
+      {
+        "anchor": "GitHub",
+        "icon": "github",
+        "href": "https://github.com/humain-ai"
+      }
+    ],
     "tabs": [
       {
         "tab": "Guides",
@@ -16,111 +40,119 @@
           {
             "group": "Getting started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "concepts/authentication",
+              "concepts/session-lifecycle",
+              "concepts/modes",
+              "concepts/sandbox-mode",
+              "concepts/error-codes",
+              "concepts/rate-limits"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Connection types",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "connections/overview",
+              "connections/rest-text",
+              "connections/websocket-streaming",
+              "connections/webrtc-voice",
+              "connections/voip-sip"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Try it out",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/components",
-              "essentials/reusable-snippets"
+              "playground/text",
+              "playground/voice",
+              "playground/not-testable"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Integrate",
+        "groups": [
+          {
+            "group": "Web",
+            "pages": [
+              "web/quickstart",
+              "web/drop-in-widget",
+              "web/react",
+              "web/vue",
+              "web/svelte",
+              "web/vanilla-js",
+              "web/streaming-ui",
+              "web/customisation"
             ]
           },
           {
-            "group": "Agent ready",
+            "group": "SDKs",
             "pages": [
-              "agent-ready/prompt",
-              "agent-ready/visibility",
-              "agent-ready/contextual",
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "sdks/overview",
+              "sdks/python",
+              "sdks/go",
+              "sdks/dotnet",
+              "sdks/swift",
+              "sdks/kotlin"
+            ]
+          },
+          {
+            "group": "Mobile",
+            "pages": [
+              "mobile/ios-swift",
+              "mobile/android-kotlin",
+              "mobile/voice-on-mobile",
+              "mobile/audio-session-ios",
+              "mobile/audio-session-android"
+            ]
+          },
+          {
+            "group": "VoIP & telephony",
+            "pages": [
+              "voip/overview",
+              "voip/sip-gateway",
+              "voip/asterisk-agi",
+              "voip/asterisk-ari",
+              "voip/twilio",
+              "voip/vonage",
+              "voip/telnyx",
+              "voip/codec-guide",
+              "voip/troubleshooting"
+            ]
+          },
+          {
+            "group": "Plugins",
+            "pages": [
+              "plugins/wordpress",
+              "plugins/freepbx",
+              "plugins/3cx"
+            ]
+          },
+          {
+            "group": "Embedded",
+            "pages": [
+              "embedded/overview",
+              "embedded/c-library",
+              "embedded/raspberry-pi",
+              "embedded/freertos",
+              "embedded/zephyr",
+              "embedded/audio-hardware",
+              "embedded/credential-management",
+              "embedded/ota-updates"
             ]
           }
         ]
       },
       {
         "tab": "API reference",
-        "groups": [
-          {
-            "group": "API documentation",
-            "pages": [
-              "api-reference/introduction"
-            ]
-          },
-          {
-            "group": "Endpoint examples",
-            "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
-            ]
-          }
-        ]
+        "openapi": "openapi.yaml"
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
+    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/humain-ai"
     }
-  }
+  },
+  "css": "/custom.css"
 }

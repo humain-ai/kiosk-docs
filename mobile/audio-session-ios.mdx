@@ -1,0 +1,341 @@
+---
+title: "iOS audio session"
+description: "Complete AVAudioSession reference for Humain Kiosk voice integration — categories, modes, options, and notifications."
+icon: "volume-high"
+---
+
+This page is a reference for `AVAudioSession` configuration in iOS apps using the Humain Kiosk
+voice SDK. Read this if you need to customise audio routing beyond what the
+[iOS guide](/mobile/ios-swift) covers, or if you are integrating the session into an app that
+already manages `AVAudioSession` (e.g., a music player or call app).
+
+---
+
+## Category selection
+
+The `AVAudioSession` category determines what your app can do with audio. For voice sessions,
+use `.playAndRecord`:
+
+<CodeGroup>
+```swift UIKit
+import AVFoundation
+
+func configureAudioSession() throws {
+    let session = AVAudioSession.sharedInstance()
+    try session.setCategory(
+        .playAndRecord,
+        mode: .voiceChat,
+        options: [.defaultToSpeaker, .allowBluetooth]
+    )
+    try session.setActive(true)
+}
+```
+
+```swift SwiftUI
+import AVFoundation
+import SwiftUI
+
+struct VoiceView: View {
+    @State private var isConfigured = false
+
+    var body: some View {
+        Button("Start conversation") {
+            configureAndStart()
+        }
+    }
+
+    private func configureAndStart() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(
+                .playAndRecord,
+                mode: .voiceChat,
+                options: [.defaultToSpeaker, .allowBluetooth]
+            )
+            try session.setActive(true)
+            isConfigured = true
+        } catch {
+            print("Audio session error: \(error)")
+        }
+    }
+}
+```
+</CodeGroup>
+
+| Category | When to use |
+|---|---|
+| `.playAndRecord` | **Recommended** — simultaneous capture and playback; required for voice sessions |
+| `.playback` | Playback only — cannot capture microphone |
+| `.record` | Capture only — no TTS playback |
+| `.ambient` | Mixes with other apps' audio — not suitable for voice sessions |
+
+---
+
+## Mode selection
+
+The mode fine-tunes processing within the category. For voice sessions:
+
+<CodeGroup>
+```swift UIKit
+try session.setCategory(.playAndRecord, mode: .voiceChat)
+```
+
+```swift SwiftUI
+// Same API — mode is set on AVAudioSession.sharedInstance()
+try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .voiceChat)
+```
+</CodeGroup>
+
+| Mode | Effect | When to use |
+|---|---|---|
+| `.voiceChat` | **Recommended** — enables echo cancellation, AGC, noise suppression | VoIP and AI voice assistants |
+| `.videoChat` | Same as `.voiceChat` but enables video processing optimisations | Video call apps |
+| `.default` | No special processing | Music apps, general playback |
+| `.measurement` | Disables all processing — flat signal | Acoustic testing |
+
+`.voiceChat` activates hardware echo cancellation (AEC) and automatic gain control (AGC).
+These are essential for voice sessions — without AEC the microphone picks up the AI's TTS
+audio and feeds it back to the server.
+
+---
+
+## Option flags
+
+<CodeGroup>
+```swift UIKit
+try session.setCategory(
+    .playAndRecord,
+    mode: .voiceChat,
+    options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
+)
+```
+
+```swift SwiftUI
+// Identical — set on the shared session instance
+```
+</CodeGroup>
+
+| Option | Effect |
+|---|---|
+| `.defaultToSpeaker` | Routes audio to the built-in speaker when no headset is connected. Without this, audio defaults to the earpiece (quiet, held-to-ear). |
+| `.allowBluetooth` | Enables Bluetooth SCO (hands-free profile) — required for AirPods and BT headsets in voice mode. |
+| `.allowBluetoothA2DP` | Enables Bluetooth A2DP (stereo profile) — better audio quality but no microphone input. Not recommended for voice sessions. |
+| `.mixWithOthers` | Allows mixing with other apps' audio (e.g., background music). Avoid for voice sessions — mixing degrades STT accuracy. |
+| `.duckOthers` | Ducks (lowers volume of) other apps' audio while your session is active. |
+
+---
+
+## Activation and deactivation
+
+<CodeGroup>
+```swift UIKit
+// Activate before starting the voice session
+func activateAudioSession() throws {
+    try AVAudioSession.sharedInstance().setActive(true)
+}
+
+// Deactivate after stopping the voice session
+// .notifyOthersOnDeactivation tells other apps to restore their audio
+func deactivateAudioSession() throws {
+    try AVAudioSession.sharedInstance().setActive(
+        false,
+        options: .notifyOthersOnDeactivation
+    )
+}
+```
+
+```swift SwiftUI
+// Same calls — typically placed in a ViewModel or @Observable class
+class AudioSessionManager: ObservableObject {
+    func activate() throws {
+        try AVAudioSession.sharedInstance().setActive(true)
+    }
+
+    func deactivate() throws {
+        try AVAudioSession.sharedInstance().setActive(
+            false,
+            options: .notifyOthersOnDeactivation
+        )
+    }
+}
+```
+</CodeGroup>
+
+<Warning>
+  Always call `setActive(false, options: .notifyOthersOnDeactivation)` when you stop your
+  voice session. Failing to deactivate prevents other apps (e.g., Spotify, podcasts) from
+  resuming their audio.
+</Warning>
+
+---
+
+## Interruption notifications
+
+Register for `AVAudioSession.interruptionNotification` to handle incoming calls, Siri
+activation, and alarm sounds:
+
+<CodeGroup>
+```swift UIKit
+class VoiceViewController: UIViewController {
+    private var interruptionObserver: NSObjectProtocol?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleInterruption(notification)
+        }
+    }
+
+    private func handleInterruption(_ notification: Notification) {
+        guard
+            let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+            let type = AVAudioSession.InterruptionType(rawValue: typeValue)
+        else { return }
+
+        switch type {
+        case .began:
+            // Mute session — do not deactivate AVAudioSession here
+            voiceSession?.isMuted = true
+
+        case .ended:
+            let options = notification.userInfo
+                .flatMap { $0[AVAudioSessionInterruptionOptionKey] as? UInt }
+                .map { AVAudioSession.InterruptionOptions(rawValue: $0) }
+            if options?.contains(.shouldResume) == true {
+                try? AVAudioSession.sharedInstance().setActive(true)
+                voiceSession?.isMuted = false
+            }
+
+        @unknown default: break
+        }
+    }
+}
+```
+
+```swift SwiftUI
+class VoiceViewModel: ObservableObject {
+    private var cancellables: Set<AnyCancellable> = []
+
+    init() {
+        NotificationCenter.default
+            .publisher(for: AVAudioSession.interruptionNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] notification in
+                self?.handleInterruption(notification)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handleInterruption(_ notification: Notification) {
+        guard
+            let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+            let type = AVAudioSession.InterruptionType(rawValue: typeValue)
+        else { return }
+
+        if type == .began {
+            voiceSession?.isMuted = true
+        } else if type == .ended {
+            let optValue = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+            let options = optValue.map { AVAudioSession.InterruptionOptions(rawValue: $0) }
+            if options?.contains(.shouldResume) == true {
+                try? AVAudioSession.sharedInstance().setActive(true)
+                voiceSession?.isMuted = false
+            }
+        }
+    }
+}
+```
+</CodeGroup>
+
+---
+
+## Route change notifications
+
+Register for `AVAudioSession.routeChangeNotification` to handle headphone plug/unplug and
+Bluetooth connect/disconnect events:
+
+<CodeGroup>
+```swift UIKit
+NotificationCenter.default.addObserver(
+    forName: AVAudioSession.routeChangeNotification,
+    object: AVAudioSession.sharedInstance(),
+    queue: .main
+) { notification in
+    guard
+        let reasonValue = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+        let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
+    else { return }
+
+    switch reason {
+    case .oldDeviceUnavailable:
+        // Wired headphones unplugged — audio reroutes to speaker
+        // Brief mute prevents echo burst
+        voiceSession?.isMuted = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            voiceSession?.isMuted = false
+        }
+
+    case .newDeviceAvailable:
+        // AirPods or wired headset connected — routing handled by OS
+        break
+
+    case .categoryChange:
+        // Another app changed the session category — re-apply ours
+        try? AVAudioSession.sharedInstance().setCategory(
+            .playAndRecord, mode: .voiceChat,
+            options: [.defaultToSpeaker, .allowBluetooth]
+        )
+
+    default:
+        break
+    }
+}
+```
+
+```swift SwiftUI
+NotificationCenter.default
+    .publisher(for: AVAudioSession.routeChangeNotification)
+    .receive(on: RunLoop.main)
+    .sink { notification in
+        guard
+            let reasonValue = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+            let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
+        else { return }
+
+        if reason == .oldDeviceUnavailable {
+            voiceSession?.isMuted = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                voiceSession?.isMuted = false
+            }
+        }
+    }
+    .store(in: &cancellables)
+```
+</CodeGroup>
+
+---
+
+## Current route inspection
+
+Query the current audio output route to show the user where audio is playing:
+
+```swift
+func currentOutputRoute() -> String {
+    let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+    return outputs.first.map { output in
+        switch output.portType {
+        case .builtInSpeaker:  return "Speaker"
+        case .builtInReceiver: return "Earpiece"
+        case .headphones:      return "Headphones"
+        case .bluetoothHFP:    return "Bluetooth (HFP)"
+        case .bluetoothA2DP:   return "Bluetooth (A2DP)"
+        case .airPlay:         return "AirPlay"
+        default:               return output.portName
+        }
+    } ?? "Unknown"
+}
+```

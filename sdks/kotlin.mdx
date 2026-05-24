@@ -1,0 +1,104 @@
+---
+title: "Kotlin"
+description: "Native Android SDK for Humain Kiosk — text sessions, Kotlin Flow streaming, and WebRTC voice."
+icon: "smartphone"
+---
+
+import SdkSandboxNote from '/snippets/sdk-sandbox-note.mdx';
+
+The Kotlin SDK wraps the Humain Device API with coroutine-native suspend functions and Kotlin
+`Flow` for streaming. It is the only server-side SDK that includes WebRTC voice — audio
+capture, WebRTC negotiation, and VAD are all handled inside the SDK.
+
+For a complete integration walkthrough — including Gradle setup, Compose ViewModel examples,
+runtime permission handling, and AudioManager configuration — see the
+[Android guide](/mobile/android-kotlin).
+
+<SdkSandboxNote />
+
+---
+
+## Install
+
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation("ai.humain:kiosk-android:1.0.0")
+}
+```
+
+Add permissions to `AndroidManifest.xml`:
+
+```xml
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+```
+
+---
+
+## Quick example
+
+```kotlin
+val client = KioskClient(KioskConfig(
+    credential = BuildConfig.HUMAIN_CREDENTIAL
+))
+
+val session = client.openSession()
+val response = session.sendMessage("What are your opening hours?")
+println(response.text)
+session.close()
+```
+
+---
+
+## `KioskConfig` fields
+
+<ParamField body="credential" type="String" required>
+  Your device credential token in `hk_live_…` format. Store in `BuildConfig` (injected from
+  `local.properties`) — never commit to source control.
+</ParamField>
+
+<ParamField body="mode" type="KioskConfig.Mode" default="Mode.LIVE">
+  `Mode.SANDBOX` returns instant stub responses without consuming AI credits. Use `Mode.LIVE`
+  for production.
+</ParamField>
+
+<ParamField body="timeoutSeconds" type="Long" default="30">
+  OkHttp call timeout in seconds. Applied to the session open call and each `sendMessage()`
+  call.
+</ParamField>
+
+<ParamField body="maxRetries" type="Int" default="2">
+  Number of automatic retries on provider errors (`503`). Uses exponential back-off starting
+  at 1 second.
+</ParamField>
+
+<ParamField body="baseUrl" type="String" default='"https://api.humain.ai"'>
+  Override the API base URL. Useful for testing against a local proxy or staging environment.
+</ParamField>
+
+---
+
+## Exception types
+
+<ResponseField name="KioskException.AuthenticationException" type="KioskException">
+  `401` — invalid or revoked credential.
+</ResponseField>
+
+<ResponseField name="KioskException.RateLimitException" type="KioskException">
+  `429` — too many requests. Check `retryAfterSeconds` for the minimum wait time.
+</ResponseField>
+
+<ResponseField name="KioskException.ProviderException" type="KioskException">
+  `503` — LLM temporarily unavailable. Check `isRetryable` before retrying.
+</ResponseField>
+
+<ResponseField name="KioskException.MicrophonePermissionException" type="KioskException">
+  `RECORD_AUDIO` permission was not granted before calling `openVoiceSession()`. Request the
+  permission in your Activity or Composable before starting a voice session.
+</ResponseField>
+
+<ResponseField name="KioskException.SessionEndedException" type="KioskException">
+  Thrown when calling `sendMessage()` or `stream()` on a session that has been closed.
+</ResponseField>

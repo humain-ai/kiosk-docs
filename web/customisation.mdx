@@ -1,0 +1,199 @@
+---
+title: "Customising the widget"
+description: "CSS custom properties, theme objects, and custom component slots — make the Humain widget match your brand exactly."
+icon: "palette"
+---
+
+The Humain widget ships with a complete design system expressed as CSS custom properties. You can
+theme it with a few variable overrides, supply a full theme object, or replace individual components
+entirely with your own.
+
+---
+
+## CSS custom properties
+
+Set these variables on any ancestor element (or `:root`) to override the widget's defaults.
+
+<Tabs>
+  <Tab title="Light mode">
+    | Variable | Default | Description |
+    |---|---|---|
+    | `--hk-primary` | `#1D9E75` | Accent colour — FAB, send button, user message bubbles |
+    | `--hk-primary-hover` | `#12614a` | Hover state of primary elements |
+    | `--hk-bg` | `#ffffff` | Widget panel background |
+    | `--hk-surface` | `#f9fafb` | Input and header background |
+    | `--hk-border` | `#e5e7eb` | Borders and dividers |
+    | `--hk-text` | `#111827` | Primary text |
+    | `--hk-text-muted` | `#6b7280` | Secondary text (timestamps, labels) |
+    | `--hk-user-bubble-bg` | `var(--hk-primary)` | User message bubble background |
+    | `--hk-user-bubble-text` | `#ffffff` | User message bubble text |
+    | `--hk-ai-bubble-bg` | `#f3f4f6` | AI message bubble background |
+    | `--hk-ai-bubble-text` | `#111827` | AI message bubble text |
+    | `--hk-radius` | `12px` | Corner radius of message bubbles |
+    | `--hk-fab-size` | `56px` | Width and height of the floating action button |
+    | `--hk-shadow` | `0 8px 30px rgba(0,0,0,0.12)` | Widget panel drop shadow |
+    | `--hk-z-index` | `9999` | CSS `z-index` of the widget container |
+    | `--hk-font` | `inherit` | Font family |
+    | `--hk-width` | `380px` | Widget panel width |
+  </Tab>
+  <Tab title="Dark mode">
+    Override these variables inside a `@media (prefers-color-scheme: dark)` block or a `.dark`
+    class to support dark mode:
+
+    | Variable | Recommended dark value | Description |
+    |---|---|---|
+    | `--hk-primary` | `#4fc49a` | Lighter green for dark backgrounds |
+    | `--hk-primary-hover` | `#1D9E75` | |
+    | `--hk-bg` | `#18181b` | Widget panel background |
+    | `--hk-surface` | `#27272a` | Input and header background |
+    | `--hk-border` | `#3f3f46` | Borders |
+    | `--hk-text` | `#fafafa` | Primary text |
+    | `--hk-text-muted` | `#a1a1aa` | Secondary text |
+    | `--hk-ai-bubble-bg` | `#27272a` | AI bubble background |
+    | `--hk-ai-bubble-text` | `#fafafa` | AI bubble text |
+
+    ```css
+    /* Match the system preference */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --hk-bg: #18181b;
+        --hk-surface: #27272a;
+        --hk-border: #3f3f46;
+        --hk-text: #fafafa;
+        --hk-text-muted: #a1a1aa;
+        --hk-ai-bubble-bg: #27272a;
+        --hk-ai-bubble-text: #fafafa;
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Quick brand colour override
+
+```css
+/* Apply to :root or a container element */
+:root {
+  --hk-primary:       #7c3aed; /* your brand colour */
+  --hk-primary-hover: #5b21b6;
+}
+```
+
+---
+
+## Custom themes
+
+For larger-scale customisation, pass a `theme` object to `HumainWidget.init()`, `<KioskChat>`, or
+`HumainKioskClient`:
+
+```javascript
+HumainWidget.init({
+  credential: "hk_live_your_credential_here",
+  theme: {
+    primary:         "#7c3aed",
+    primaryHover:    "#5b21b6",
+    background:      "#ffffff",
+    surface:         "#f5f3ff",
+    border:          "#ede9fe",
+    text:            "#1e1b4b",
+    textMuted:       "#6b7280",
+    radius:          "8px",
+    fabSize:         "60px",
+    width:           "400px",
+    dark: {
+      // Override any property specifically in dark mode
+      background: "#1e1b4b",
+      surface:    "#312e81",
+    },
+  },
+})
+```
+
+```tsx
+// React
+<KioskChat
+  credential="hk_live_your_credential_here"
+  theme={{
+    primary: "#7c3aed",
+    radius: "8px",
+  }}
+/>
+```
+
+```vue
+// Vue
+<KioskChat
+  credential="hk_live_your_credential_here"
+  :theme="{ primary: '#7c3aed', radius: '8px' }"
+/>
+```
+
+---
+
+## Custom components
+
+Replace individual internal components with your own. This uses a render prop / slot pattern that
+lets you keep the widget's state machine while controlling the visual output.
+
+### React — render props
+
+```tsx
+import { KioskChat, type MessageBubbleProps } from "@humain/kiosk-js/react"
+
+// Custom message bubble
+function MyBubble({ role, content, streaming }: MessageBubbleProps) {
+  return (
+    <div className={`my-bubble my-bubble--${role}`}>
+      <span className="my-bubble__avatar">{role === "user" ? "You" : "AI"}</span>
+      <p className={streaming ? "my-bubble__text--streaming" : "my-bubble__text"}>
+        {content}
+      </p>
+    </div>
+  )
+}
+
+export function Chat() {
+  return (
+    <KioskChat
+      credential="hk_live_your_credential_here"
+      components={{
+        MessageBubble: MyBubble,
+        // Also replaceable: Header, InputArea, SendButton, TypingIndicator
+      }}
+    />
+  )
+}
+```
+
+### Vue — slots
+
+```vue
+<template>
+  <KioskChat credential="hk_live_your_credential_here">
+    <template #message="{ role, content, streaming }">
+      <div :class="['my-bubble', `my-bubble--${role}`]">
+        <span>{{ role === 'user' ? 'You' : 'AI' }}</span>
+        <p :class="{ streaming }">{{ content }}</p>
+      </div>
+    </template>
+
+    <template #header>
+      <div class="my-header">
+        <img src="/logo.svg" alt="Logo" />
+        <h2>Support</h2>
+      </div>
+    </template>
+  </KioskChat>
+</template>
+```
+
+### Available slots / render props
+
+| Name | Props / slot data | What it replaces |
+|---|---|---|
+| `MessageBubble` | `role`, `content`, `streaming` | Each message in the history list |
+| `Header` | `title`, `onClose` | The coloured header bar |
+| `InputArea` | `value`, `onChange`, `onSubmit`, `disabled` | The input field and send button row |
+| `SendButton` | `disabled`, `onClick` | Just the send button |
+| `TypingIndicator` | — | The `…` animation while waiting for the first token |
+| `EmptyState` | — | The content shown before the first message |

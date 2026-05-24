@@ -1,0 +1,174 @@
+---
+title: "Vanilla JavaScript"
+description: "Use the @humain/kiosk-js core client with plain DOM APIs — no framework required."
+icon: "code"
+---
+
+import InstallJs from '/snippets/install-js.mdx';
+import SandboxTip from '/snippets/sandbox-tip.mdx';
+import CredentialWarning from '/snippets/credential-warning.mdx';
+
+## Install
+
+<InstallJs />
+
+Or load directly in a browser with an import map or CDN:
+
+```html
+<script type="importmap">
+  {
+    "imports": {
+      "@humain/kiosk-js": "https://cdn.humain.ai/kiosk-js/latest/index.esm.js"
+    }
+  }
+</script>
+```
+
+<SandboxTip />
+
+## Streaming chat — complete example
+
+This is a self-contained example that runs in a browser's `<script type="module">` block. No
+build tools needed.
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Humain Chat Demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 520px; margin: 40px auto; padding: 0 16px; }
+    #messages { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; min-height: 200px;
+                max-height: 400px; overflow-y: auto; margin-bottom: 12px; }
+    .user      { text-align: right; color: #1D9E75; margin: 6px 0; }
+    .assistant { text-align: left; color: #111827;  margin: 6px 0; }
+    #form      { display: flex; gap: 8px; }
+    input      { flex: 1; padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 6px; }
+    button     { padding: 8px 16px; background: #1D9E75; color: white; border: none;
+                 border-radius: 6px; cursor: pointer; font-weight: 600; }
+    button:disabled { opacity: 0.5; cursor: default; }
+  </style>
+</head>
+<body>
+
+<h2>Chat demo</h2>
+<div id="messages"></div>
+<form id="form">
+  <input id="input" placeholder="Type a message…" autocomplete="off" />
+  <button id="send" type="submit">Send</button>
+</form>
+
+<script type="module">
+import { HumainKioskClient } from "@humain/kiosk-js"
+
+// ─── Setup ────────────────────────────────────────────────────────────────────
+
+const kiosk   = new HumainKioskClient({ credential: "hk_live_YOUR_TOKEN", mode: "sandbox" })
+const session = await kiosk.openSession()
+
+const $messages = document.getElementById("messages")
+const $input    = document.getElementById("input")
+const $send     = document.getElementById("send")
+
+window.addEventListener("beforeunload", () => session.close())
+
+// ─── DOM helpers ──────────────────────────────────────────────────────────────
+
+function appendMessage(role, text = "") {
+  const div = document.createElement("div")
+  div.className = role
+  div.textContent = text
+  $messages.appendChild(div)
+  $messages.scrollTop = $messages.scrollHeight
+  return div // return ref for streaming updates
+}
+
+// ─── Send handler ──────────────────────────────────────────────────────────────
+
+document.getElementById("form").addEventListener("submit", async (e) => {
+  e.preventDefault()
+  const text = $input.value.trim()
+  if (!text) return
+
+  $input.value = ""
+  $send.disabled = true
+  $input.disabled = true
+
+  appendMessage("user", text)
+  const assistantDiv = appendMessage("assistant", "▌") // cursor while streaming
+
+  try {
+    let buffer = ""
+    for await (const event of session.stream(text)) {
+      if (event.type === "chunk") {
+        buffer += event.content
+        assistantDiv.textContent = buffer + "▌"
+        $messages.scrollTop = $messages.scrollHeight
+      }
+      if (event.type === "turn_end") {
+        assistantDiv.textContent = buffer // remove cursor
+      }
+    }
+  } catch (err) {
+    assistantDiv.textContent = "⚠ Error: " + err.message
+  } finally {
+    $send.disabled = false
+    $input.disabled = false
+    $input.focus()
+  }
+})
+</script>
+</body>
+</html>
+```
+
+## Key patterns
+
+### Streaming tokens into the DOM
+
+The critical loop: create a DOM node before the stream starts, then mutate it in place
+as chunks arrive. This avoids layout shift from re-rendering.
+
+```javascript
+const node = document.createElement("p")
+container.appendChild(node)
+
+let text = ""
+for await (const event of session.stream(input)) {
+  if (event.type === "chunk") {
+    text += event.content
+    node.textContent = text // mutate in place — fast, no re-render
+  }
+}
+```
+
+### Handling rate limits
+
+```javascript
+async function sendWithRetry(session, input, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await session.sendMessage(input)
+    } catch (err) {
+      if (err.code === "RATE_LIMITED" && i < retries - 1) {
+        await new Promise(r => setTimeout(r, (err.retryAfterSeconds ?? 5) * 1000))
+      } else {
+        throw err
+      }
+    }
+  }
+}
+```
+
+### Cleaning up sessions
+
+Always close the session when the user leaves:
+
+```javascript
+window.addEventListener("beforeunload", () => session.close())
+// or for SPAs:
+document.getElementById("close-btn").addEventListener("click", () => session.close())
+```
+
+<CredentialWarning />

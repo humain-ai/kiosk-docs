@@ -1,0 +1,195 @@
+---
+title: "Zephyr RTOS"
+description: "Integrate the Humain Kiosk C library into a Zephyr application — Kconfig options, CMakeLists.txt, and a minimal sample."
+icon: "zap"
+---
+
+<Warning>
+  **Voice sessions are not supported on Zephyr.** The WebRTC audio pipeline requires a full
+  POSIX thread model and ALSA. Zephyr targets support **text sessions and streaming only**.
+  For voice, use the [Raspberry Pi guide](/embedded/raspberry-pi) instead.
+</Warning>
+
+The `kiosk-c` library is distributed as a Zephyr module. Add it to your `west.yml` manifest and
+configure it via Kconfig.
+
+**Prerequisites:** Zephyr 3.5+, west, `CONFIG_NETWORKING=y`, `CONFIG_NET_TCP=y`,
+`CONFIG_TLS_CREDENTIALS=y`.
+
+---
+
+## Add the module to `west.yml`
+
+```yaml
+# west.yml
+manifest:
+  projects:
+    - name: kiosk-c
+      url: https://github.com/humain/kiosk-c
+      revision: v1.0.0
+      path: modules/lib/kiosk-c
+```
+
+Run `west update` after editing the manifest.
+
+---
+
+## Kconfig options
+
+Add to your `prj.conf`:
+
+```kconfig
+# Enable networking (required)
+CONFIG_NETWORKING=y
+CONFIG_NET_TCP=y
+CONFIG_NET_SOCKETS=y
+CONFIG_NET_SOCKETS_POSIX_NAMES=y
+
+# TLS (required for HTTPS)
+CONFIG_TLS_CREDENTIALS=y
+CONFIG_MBEDTLS=y
+CONFIG_MBEDTLS_ENABLE_HEAP=y
+CONFIG_MBEDTLS_HEAP_SIZE=65536
+
+# Humain Kiosk module
+CONFIG_HUMAIN_KIOSK=y
+CONFIG_HUMAIN_KIOSK_CREDENTIAL="hk_live_your_token_here"
+CONFIG_HUMAIN_KIOSK_TIMEOUT_MS=20000
+CONFIG_HUMAIN_KIOSK_MAX_RETRIES=5
+CONFIG_HUMAIN_KIOSK_SANDBOX=n
+
+# Stack and heap
+CONFIG_HEAP_MEM_POOL_SIZE=131072
+CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE=4096
+CONFIG_MAIN_STACK_SIZE=8192
+```
+
+<Warning>
+  `CONFIG_HUMAIN_KIOSK_CREDENTIAL` stores the credential in firmware flash. For production
+  deployments, provision credentials via secure NVS or the Zephyr settings subsystem — see
+  [Credential management](/embedded/credential-management).
+</Warning>
+
+---
+
+## CMakeLists.txt
+
+```cmake
+cmake_minimum_required(VERSION 3.22)
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(humain_kiosk_sample)
+
+target_sources(app PRIVATE src/main.c)
+```
+
+The Kconfig options above ensure the module is linked automatically when `CONFIG_HUMAIN_KIOSK=y`.
+
+---
+
+## Sample application
+
+```c
+/* src/main.c */
+#include <zephyr/kernel.h>
+#include <zephyr/net/net_if.h>
+#include <stdio.h>
+#include "kiosk.h"
+
+/* Wait for the network interface to be ready */
+static void wait_for_network(void) {
+    struct net_if *iface = net_if_get_default();
+    while (!net_if_is_up(iface)) {
+        k_sleep(K_MSEC(500));
+    }
+    k_sleep(K_SECONDS(2)); /* allow DHCP to complete */
+}
+
+static int on_chunk(const char *chunk, size_t chunk_len, void *userdata) {
+    (void)userdata;
+    printk("%.*s", (int)chunk_len, chunk);
+    return 0;
+}
+
+int main(void) {
+    printk("Humain Kiosk — Zephyr sample\n");
+    wait_for_network();
+
+    /* Credential is baked in via Kconfig for this sample.
+     * In production, read from settings subsystem. */
+    kiosk_config_t cfg = {0};
+    cfg.credential  = CONFIG_HUMAIN_KIOSK_CREDENTIAL;
+    cfg.timeout_ms  = CONFIG_HUMAIN_KIOSK_TIMEOUT_MS;
+    cfg.max_retries = CONFIG_HUMAIN_KIOSK_MAX_RETRIES;
+    cfg.sandbox     = IS_ENABLED(CONFIG_HUMAIN_KIOSK_SANDBOX) ? 1 : 0;
+
+    kiosk_client_t *client = kiosk_client_create(&cfg);
+    if (!client) {
+        printk("ERROR: Failed to create kiosk client\n");
+        return -ENOMEM;
+    }
+
+    kiosk_session_t *session = NULL;
+    kiosk_error_t err = kiosk_session_open(client, KIOSK_SESSION_TEXT, &session);
+    if (err != KIOSK_OK) {
+        printk("ERROR: %s\n", kiosk_error_string(err));
+        kiosk_client_destroy(client);
+        return -EIO;
+    }
+
+    printk("Session open. Sending message...\n");
+
+    printk("AI: ");
+    err = kiosk_session_stream(session, "What are your opening hours?", on_chunk, NULL);
+    printk("\n");
+
+    if (err != KIOSK_OK) {
+        printk("Stream error: %s\n", kiosk_error_string(err));
+    }
+
+    kiosk_session_close(session);
+    kiosk_client_destroy(client);
+    return 0;
+}
+```
+
+---
+
+## Board overlay example (nRF9160 DK)
+
+```dts
+/* boards/nrf9160dk_nrf9160_ns.overlay */
+/ {
+    chosen {
+        zephyr,console = &uart0;
+        zephyr,shell-uart = &uart0;
+    };
+};
+
+&uart0 {
+    status = "okay";
+    current-speed = <115200>;
+};
+```
+
+---
+
+## Flashing and testing
+
+```bash
+# Build
+west build -b nrf9160dk/nrf9160/ns samples/humain_kiosk
+
+# Flash
+west flash
+
+# Monitor serial output
+west espressif monitor  # or: picocom -b 115200 /dev/ttyACM0
+```
+
+You should see:
+
+```
+Humain Kiosk — Zephyr sample
+Session open. Sending message...
+AI: We are open Monday to Friday, 9 AM to 6 PM...
+```

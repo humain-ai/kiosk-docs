@@ -1,0 +1,295 @@
+---
+title: ".NET"
+sidebarTitle: ".NET (C#)"
+description: "async/await .NET SDK for Humain Kiosk — text sessions, streaming, and ASP.NET Core dependency injection."
+icon: "square-code"
+---
+
+import SdkSandboxNote from '/snippets/sdk-sandbox-note.mdx';
+import SdkCredentialEnv from '/snippets/sdk-credential-env.mdx';
+
+## Install
+
+```bash
+dotnet add package Humain.Kiosk
+```
+
+Requires .NET 8+. Compatible with .NET 8 and .NET 9. The package targets `net8.0` and above.
+
+<SdkSandboxNote />
+
+---
+
+## Quick start
+
+<Tabs>
+  <Tab title="Text session">
+    `await using` ensures the session is closed even if an exception is thrown.
+
+    ```csharp
+    using Humain.Kiosk;
+
+    var client = new KioskClient(new KioskClientOptions
+    {
+        Credential = "hk_live_your_credential_here",
+    });
+
+    await using var session = await client.OpenSessionAsync();
+
+    var response = await session.SendMessageAsync("What are your opening hours?");
+    Console.WriteLine(response.Text);
+    Console.WriteLine($"Actions called: {string.Join(", ", response.ActionsCalled)}");
+    ```
+  </Tab>
+  <Tab title="Streaming session">
+    `await foreach` over `session.StreamAsync()` receives events as they are generated.
+
+    ```csharp
+    using Humain.Kiosk;
+
+    var client = new KioskClient(new KioskClientOptions
+    {
+        Credential = "hk_live_your_credential_here",
+    });
+
+    await using var session = await client.OpenSessionAsync();
+
+    Console.Write("Assistant: ");
+    await foreach (var evt in session.StreamAsync("Tell me about your services"))
+    {
+        if (evt is ChunkEvent chunk)
+            Console.Write(chunk.Content);
+    }
+    Console.WriteLine();
+    ```
+
+    Stream event types:
+
+    | Type | Properties | Description |
+    |---|---|---|
+    | `TurnStartEvent` | — | The AI has started generating |
+    | `ChunkEvent` | `Content` | A token fragment — append to output |
+    | `ToolCallEvent` | `Name`, `CallId` | An action endpoint was invoked |
+    | `ToolResultEvent` | `CallId`, `Status` | Action endpoint returned |
+    | `TurnEndEvent` | `MessageCount` | Generation complete |
+  </Tab>
+  <Tab title="Dependency injection">
+    Register `IKioskClient` with the ASP.NET Core service container using the provided
+    extension method.
+
+    ```csharp
+    // Program.cs
+    using Humain.Kiosk;
+
+    var builder = WebApplication.CreateBuilder(args);
+
+    builder.Services.AddKioskClient(options =>
+    {
+        options.Credential = builder.Configuration["Humain:Credential"];
+        options.Mode = KioskMode.Live;
+    });
+
+    builder.Services.AddControllers();
+
+    var app = builder.Build();
+    app.MapControllers();
+    app.Run();
+    ```
+
+    ```csharp
+    // ChatController.cs
+    using Humain.Kiosk;
+    using Microsoft.AspNetCore.Mvc;
+
+    [ApiController]
+    [Route("api/[controller]")]
+    public class ChatController(IKioskClient kiosk) : ControllerBase
+    {
+        [HttpPost("message")]
+        public async Task<IActionResult> SendMessage(
+            [FromBody] ChatRequest request,
+            CancellationToken cancellationToken)
+        {
+            await using var session = await kiosk.OpenSessionAsync(cancellationToken);
+            var response = await session.SendMessageAsync(
+                request.Input,
+                cancellationToken);
+            return Ok(new { response = response.Text });
+        }
+
+        [HttpPost("stream")]
+        public async IAsyncEnumerable<string> StreamMessage(
+            [FromBody] ChatRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await using var session = await kiosk.OpenSessionAsync(cancellationToken);
+            await foreach (var evt in session.StreamAsync(request.Input, cancellationToken))
+            {
+                if (evt is ChunkEvent chunk)
+                    yield return chunk.Content;
+            }
+        }
+    }
+
+    public record ChatRequest(string Input);
+    ```
+
+    ```json
+    // appsettings.json
+    {
+      "Humain": {
+        "Credential": "hk_live_your_credential_here"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Client options
+
+```csharp
+var client = new KioskClient(new KioskClientOptions
+{
+    Credential  = "hk_live_your_credential_here",
+    Mode        = KioskMode.Live,
+    Timeout     = TimeSpan.FromSeconds(30),
+    MaxRetries  = 2,
+});
+```
+
+<ParamField body="Credential" type="string" required>
+  Your device credential token in `hk_live_…` format. Issue credentials from the Humain
+  admin panel under **Kiosk → Credentials → Issue new credential**.
+</ParamField>
+
+<ParamField body="Mode" type="KioskMode" default="KioskMode.Live">
+  `KioskMode.Sandbox` returns instant stub responses without consuming AI credits. Use
+  `KioskMode.Live` for production.
+</ParamField>
+
+<ParamField body="Timeout" type="TimeSpan" default="TimeSpan.FromSeconds(30)">
+  `HttpClient` request timeout. Applied per request. The caller's `CancellationToken`
+  takes precedence if it expires sooner.
+</ParamField>
+
+<ParamField body="MaxRetries" type="int" default="2">
+  Number of automatic retries on `503 PROVIDER_ERROR`. Uses exponential back-off with
+  a 1-second base delay.
+</ParamField>
+
+<ParamField body="BaseUrl" type="Uri">
+  Override the API base URL. Defaults to `https://api.humain.ai`. Useful for local
+  development against a proxy or staging environment.
+</ParamField>
+
+---
+
+## Error handling
+
+The SDK throws typed exceptions derived from `KioskException`:
+
+```csharp
+using Humain.Kiosk;
+
+try
+{
+    await using var session = await client.OpenSessionAsync();
+    var response = await session.SendMessageAsync("Hello");
+    Console.WriteLine(response.Text);
+}
+catch (RateLimitException ex)
+{
+    Console.WriteLine($"Rate limited — retry after {ex.RetryAfter.TotalSeconds}s");
+    await Task.Delay(ex.RetryAfter);
+}
+catch (ProviderException ex) when (ex.IsRetryable)
+{
+    Console.WriteLine("Provider temporarily unavailable — will retry");
+}
+catch (AuthenticationException)
+{
+    Console.WriteLine("Invalid or revoked credential");
+}
+catch (KioskException ex)
+{
+    Console.WriteLine($"Kiosk error [{ex.ErrorCode}]: {ex.Message}");
+}
+```
+
+| Exception | Base | Cause | Extra properties |
+|---|---|---|---|
+| `KioskException` | `Exception` | Base class | `ErrorCode`, `Message` |
+| `AuthenticationException` | `KioskException` | `401` — invalid credential | — |
+| `RateLimitException` | `KioskException` | `429` — too many requests | `RetryAfter: TimeSpan` |
+| `ProviderException` | `KioskException` | `503` — LLM unavailable | `IsRetryable: bool` |
+| `SessionEndedException` | `KioskException` | Session already closed | — |
+
+---
+
+## Cancellation token support
+
+<Accordion title="Passing CancellationToken to all async methods">
+  Every async method in the SDK accepts an optional `CancellationToken`. Pass the token
+  from your ASP.NET Core request context to respect client disconnects and timeouts:
+
+  ```csharp
+  [HttpPost("chat")]
+  public async Task<IActionResult> Chat(
+      [FromBody] string input,
+      CancellationToken cancellationToken)   // ← injected by ASP.NET Core
+  {
+      try
+      {
+          await using var session = await kiosk.OpenSessionAsync(cancellationToken);
+          var response = await session.SendMessageAsync(input, cancellationToken);
+          return Ok(new { response = response.Text });
+      }
+      catch (OperationCanceledException)
+      {
+          // Client disconnected — session is disposed by await using
+          return StatusCode(499); // Client Closed Request
+      }
+  }
+  ```
+
+  Cancelling the token:
+  - Cancels any in-flight HTTP or WebSocket request immediately
+  - Triggers `DisposeAsync` on the session, which closes the session server-side
+  - Does **not** leave orphaned sessions — the `await using` pattern handles cleanup
+</Accordion>
+
+<Accordion title="Multi-turn conversation loop">
+  ```csharp
+  using Humain.Kiosk;
+
+  var client = new KioskClient(new KioskClientOptions
+  {
+      Credential = Environment.GetEnvironmentVariable("HUMAIN_CREDENTIAL")!,
+  });
+
+  await using var session = await client.OpenSessionAsync();
+
+  Console.WriteLine("Type 'exit' to quit.");
+  while (true)
+  {
+      Console.Write("You: ");
+      var input = Console.ReadLine();
+      if (string.IsNullOrEmpty(input) || input.Equals("exit", StringComparison.OrdinalIgnoreCase))
+          break;
+
+      Console.Write("Assistant: ");
+      await foreach (var evt in session.StreamAsync(input))
+      {
+          if (evt is ChunkEvent chunk)
+              Console.Write(chunk.Content);
+      }
+      Console.WriteLine();
+  }
+  ```
+</Accordion>
+
+---
+
+<SdkCredentialEnv />

@@ -1,0 +1,227 @@
+---
+title: "Asterisk ARI integration"
+description: "Control Asterisk calls programmatically with the REST Interface and bridge them to Humain Kiosk sessions."
+icon: "code"
+---
+
+import VoipCredentialNote from '/snippets/voip-credential-note.mdx';
+
+Asterisk's **ARI (Asterisk REST Interface)** exposes a WebSocket event stream and REST API that
+lets your application control call flow from outside Asterisk entirely. Unlike AGI, a single
+ARI application handles all concurrent calls in one process — making it better suited for high
+call volumes and dynamic routing logic.
+
+This guide uses the [`ari-client`](https://www.npmjs.com/package/ari-client) npm package.
+
+<VoipCredentialNote />
+
+---
+
+## Prerequisites
+
+- Asterisk 18+ with the `res_ari` module enabled
+- Node.js 18+
+- A Humain device credential
+
+---
+
+## Step 1 — Enable ARI in Asterisk
+
+Edit `/etc/asterisk/ari.conf`:
+
+```ini
+[general]
+enabled = yes
+pretty = no   ; set to yes for readable JSON in logs
+
+[humain-app]
+type = user
+password = your_ari_password
+password_format = plain
+```
+
+Edit `/etc/asterisk/http.conf` to enable the built-in HTTP server:
+
+```ini
+[general]
+enabled = yes
+bindaddr = 127.0.0.1
+bindport = 8088
+```
+
+Reload:
+
+```bash
+asterisk -rx "module reload res_ari.so"
+asterisk -rx "module reload res_http_websocket.so"
+```
+
+---
+
+## Step 2 — Create the Stasis application
+
+Create `humain-ari.js`:
+
+```javascript
+import AriClient from "ari-client"
+import fetch from "node-fetch"
+
+const ASTERISK_URL  = process.env.ASTERISK_URL  ?? "http://127.0.0.1:8088"
+const ARI_USER      = process.env.ARI_USER      ?? "humain-app"
+const ARI_PASSWORD  = process.env.ARI_PASSWORD  ?? "your_ari_password"
+const APP_NAME      = "humain-kiosk"
+const HUMAIN_CRED   = process.env.HUMAIN_CREDENTIAL   // hk_live_…
+const API_BASE      = process.env.HUMAIN_API_BASE ?? "https://api.humain.ai"
+
+// ─── Humain API helpers ────────────────────────────────────────────────────────
+
+async function openSession(metadata = {}) {
+  const res = await fetch(`${API_BASE}/v1/sessions`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${HUMAIN_CRED}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ mode: "voip", metadata }),
+  })
+  if (!res.ok) throw new Error(`Failed to open session: ${res.status}`)
+  const { session_id } = await res.json()
+  return session_id
+}
+
+async function closeSession(sessionId) {
+  try {
+    await fetch(`${API_BASE}/v1/sessions/${sessionId}/end`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${HUMAIN_CRED}` },
+    })
+  } catch (err) {
+    console.error(`Could not close session ${sessionId}:`, err.message)
+  }
+}
+
+// ─── ARI application ──────────────────────────────────────────────────────────
+
+const client = await AriClient.connect(ASTERISK_URL, ARI_USER, ARI_PASSWORD)
+console.log(`Connected to Asterisk ARI — registering app "${APP_NAME}"`)
+
+client.on("StasisStart", async (event, channel) => {
+  const callerId = channel.caller?.number ?? "unknown"
+  const did      = channel.dialplan?.exten  ?? "unknown"
+  console.log(`[${channel.id}] Inbound call from ${callerId} → ${did}`)
+
+  // Answer the channel
+  await channel.answer()
+
+  // Open a Humain voice session
+  let sessionId
+  try {
+    sessionId = await openSession({ caller_id: callerId, did })
+    console.log(`[${channel.id}] Humain session: ${sessionId}`)
+  } catch (err) {
+    console.error(`[${channel.id}] Could not open Humain session:`, err.message)
+    await channel.hangup()
+    return
+  }
+
+  // Create an ARI bridge and dial the Humain SIP gateway
+  const bridge = await client.bridges.create({ type: "mixing", name: channel.id })
+
+  // Add the inbound channel to the bridge
+  await bridge.addChannel({ channel: channel.id })
+
+  // Originate a channel to the Humain gateway using the session_id as the DID
+  const outbound = await client.channels.originate({
+    endpoint: `PJSIP/${sessionId}@humain-endpoint`,
+    app: APP_NAME,
+    appArgs: "outbound",
+    callerId: callerId,
+    timeout: 30,
+  })
+
+  console.log(`[${channel.id}] Dialling Humain gateway on channel ${outbound.id}`)
+
+  // When the outbound channel answers, add it to the bridge
+  outbound.on("StasisStart", async (_, outCh) => {
+    if (outCh.args?.[0] !== "outbound") return
+    await bridge.addChannel({ channel: outCh.id })
+    console.log(`[${channel.id}] Bridge established — audio flowing`)
+  })
+
+  // Tear down on hang-up (either side)
+  const cleanup = async () => {
+    console.log(`[${channel.id}] Cleaning up session ${sessionId}`)
+    await closeSession(sessionId)
+    try { await bridge.destroy() } catch (_) {}
+    try { await outbound.hangup() } catch (_) {}
+  }
+
+  channel.on("StasisEnd", cleanup)
+  outbound.on("ChannelHangupRequest", cleanup)
+})
+
+client.on("StasisEnd", (event, channel) => {
+  console.log(`[${channel.id}] StasisEnd`)
+})
+
+// Start listening
+await client.start(APP_NAME)
+console.log(`Stasis app "${APP_NAME}" started — waiting for calls`)
+```
+
+---
+
+## Step 3 — Dialplan entry point
+
+Route inbound calls into your Stasis application:
+
+```ini
+; /etc/asterisk/extensions.conf
+[humain-kiosk]
+exten => _X.,1,NoOp(Sending ${EXTEN} to Humain ARI app)
+ same => n,Stasis(humain-kiosk)
+ same => n,Hangup()
+```
+
+Reload:
+
+```bash
+asterisk -rx "dialplan reload"
+```
+
+---
+
+## Step 4 — Run the application
+
+```bash
+# Set credentials as environment variables
+export HUMAIN_CREDENTIAL="hk_live_YOUR_TOKEN"
+export ARI_PASSWORD="your_ari_password"
+
+node humain-ari.js
+```
+
+You should see:
+
+```
+Connected to Asterisk ARI — registering app "humain-kiosk"
+Stasis app "humain-kiosk" started — waiting for calls
+```
+
+Place a test call. The console will log each stage of the call lifecycle.
+
+---
+
+## AGI vs ARI — which should I use?
+
+| | AGI | ARI |
+|---|---|---|
+| Concurrency model | One process per call | Single process, all calls |
+| Setup complexity | Lower | Higher |
+| Call control | Dialplan + AGI commands | Full programmatic control |
+| Best for | Simple routing, low volume | High volume, complex logic |
+| Language | Any (Python, PHP, etc.) | Any HTTP client (Node.js, Go, etc.) |
+
+For most deployments, [AGI](/voip/asterisk-agi) is simpler to set up and maintain. Use ARI
+when you need to react to mid-call events, dynamically join or split bridges, or handle
+hundreds of concurrent calls in a single application.

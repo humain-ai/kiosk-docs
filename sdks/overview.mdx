@@ -1,0 +1,63 @@
+---
+title: "SDKs"
+description: "Official SDKs for Python, Go, .NET, iOS, and Android — idiomatic wrappers over the Humain Device API."
+icon: "package"
+---
+
+The Humain Kiosk SDKs wrap the raw Device API in idiomatic patterns for each language. Open
+sessions, send messages, and stream responses without writing HTTP boilerplate. The mobile SDKs
+additionally include WebRTC voice with platform-native audio session management.
+
+---
+
+## Comparison
+
+| SDK | Package | REST | WebSocket | WebRTC voice | Min version |
+|---|---|---|---|---|---|
+| Python | `humain-kiosk` on PyPI | ✓ | ✓ | ✗ | Python 3.10+ |
+| Go | `github.com/humain/kiosk-go` | ✓ | ✓ | ✗ | Go 1.21+ |
+| .NET | `Humain.Kiosk` on NuGet | ✓ | ✓ | ✗ | .NET 8+ |
+| Swift | Swift Package (GitHub) | ✓ | ✓ | ✓ | iOS 16+ / macOS 13+ |
+| Kotlin | `ai.humain:kiosk-android` on Maven | ✓ | ✓ | ✓ | Android API 26+ |
+
+<Note>
+  The server-side SDKs (Python, Go, .NET) do not include WebRTC. For real-time voice from a
+  server process, use the raw [WebRTC connection](/connections/webrtc-voice) directly, or
+  bridge telephony via [VoIP integrations](/voip/overview).
+</Note>
+
+---
+
+## Server-side SDKs
+
+<Columns cols={3}>
+  <Card title="Python" icon="python" href="/sdks/python">
+    asyncio-first. Install from PyPI. Integrates with FastAPI, Django, and any async Python
+    framework. Context-manager session lifecycle.
+  </Card>
+  <Card title="Go" icon="code" href="/sdks/go">
+    Idiomatic Go with `context`-aware APIs and goroutine-safe session management. `go get`
+    to install.
+  </Card>
+  <Card title=".NET" icon="square-code" href="/sdks/dotnet">
+    `async`/`await` throughout. Native `IServiceCollection` extension for ASP.NET Core
+    dependency injection. Install from NuGet.
+  </Card>
+</Columns>
+
+## Mobile SDKs
+
+<Columns cols={2}>
+  <Card title="Swift (iOS)" icon="smartphone" href="/sdks/swift">
+    Native iOS and macOS SDK. Text sessions, streaming, and full WebRTC voice with
+    AVAudioSession integration. Install via Swift Package Manager.
+  </Card>
+  <Card title="Kotlin (Android)" icon="smartphone" href="/sdks/kotlin">
+    Native Android SDK. Text sessions, streaming, and full WebRTC voice with AudioManager
+    integration. Install via Gradle / Maven Central.
+  </Card>
+</Columns>
+
+For full platform integration guides — including voice session lifecycle, OS audio session
+configuration, microphone permissions, and interrupt handling — see the
+[Mobile guides](/mobile/ios-swift).

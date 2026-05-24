@@ -1,0 +1,284 @@
+---
+title: "Asterisk AGI integration"
+description: "Route inbound calls to a Humain Kiosk session using an Asterisk AGI script and PJSIP trunk."
+icon: "terminal"
+---
+
+import VoipCredentialNote from '/snippets/voip-credential-note.mdx';
+
+Asterisk's **AGI (Asterisk Gateway Interface)** lets you run an external script — here, a Python
+script — mid-dialplan to control call flow. This guide shows how to open a Humain Kiosk voice
+session when a call arrives, bridge audio through the SIP gateway, and close the session on
+hang-up.
+
+Requires: **Asterisk 18+**, **Python 3.9+**.
+
+<VoipCredentialNote />
+
+---
+
+<Steps>
+  <Step title="Install the PJSIP trunk">
+    Configure the Humain SIP trunk in PJSIP. Add the following to `/etc/asterisk/pjsip.conf`:
+
+    ```ini
+    [humain-auth]
+    type=auth
+    auth_type=userpass
+    username=hk_live_YOUR_TOKEN
+    password=hk_live_YOUR_TOKEN
+
+    [humain-aor]
+    type=aor
+    contact=sip:sip.humain.ai:5061
+
+    [humain-endpoint]
+    type=endpoint
+    transport=transport-tls
+    outbound_auth=humain-auth
+    aors=humain-aor
+    from_user=hk_live_YOUR_TOKEN
+    from_domain=sip.humain.ai
+    dtmf_mode=rfc4733
+    allow=!all,ulaw,alaw,g722
+
+    [humain-trunk]
+    type=registration
+    outbound_auth=humain-auth
+    server_uri=sip:sip.humain.ai:5061
+    client_uri=sip:hk_live_YOUR_TOKEN@sip.humain.ai:5061
+    retry_interval=60
+    ```
+
+    Then reload:
+
+    ```bash
+    asterisk -rx "module reload res_pjsip.so"
+    asterisk -rx "pjsip show registrations"
+    # Confirm humain-trunk shows Status: Registered
+    ```
+  </Step>
+
+  <Step title="Install the Python AGI library">
+    ```bash
+    pip install pyst2 requests
+    ```
+
+    `pyst2` provides the `asterisk.agi` module for reading channel variables and controlling
+    call flow from Python. `requests` is used to call the Humain REST API.
+  </Step>
+
+  <Step title="Create the AGI script">
+    Create `/usr/share/asterisk/agi-bin/humain_kiosk.py` and make it executable:
+
+    ```bash
+    touch /usr/share/asterisk/agi-bin/humain_kiosk.py
+    chmod +x /usr/share/asterisk/agi-bin/humain_kiosk.py
+    ```
+
+    Paste the following:
+
+    ```python
+    #!/usr/bin/env python3
+    """
+    humain_kiosk.py — Asterisk AGI bridge for Humain Kiosk voice sessions.
+
+    Usage in dialplan:
+        AGI(humain_kiosk.py,hk_live_YOUR_TOKEN)
+    """
+
+    import sys
+    import os
+    import logging
+    import requests
+    import asterisk.agi
+
+    API_BASE = os.environ.get("HUMAIN_API_BASE", "https://api.humain.ai")
+    TIMEOUT  = 10  # seconds for API calls
+
+    logging.basicConfig(
+        filename="/var/log/asterisk/humain_kiosk.log",
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+    log = logging.getLogger(__name__)
+
+
+    def open_session(credential: str) -> str:
+        """Open a Humain Kiosk voice session and return the session_id."""
+        resp = requests.post(
+            f"{API_BASE}/v1/sessions",
+            json={"mode": "voip"},
+            headers={
+                "Authorization": f"Bearer {credential}",
+                "Content-Type": "application/json",
+            },
+            timeout=TIMEOUT,
+        )
+        resp.raise_for_status()
+        return resp.json()["session_id"]
+
+
+    def close_session(credential: str, session_id: str) -> None:
+        """Close the Humain Kiosk session — best-effort, does not raise."""
+        try:
+            requests.post(
+                f"{API_BASE}/v1/sessions/{session_id}/end",
+                headers={"Authorization": f"Bearer {credential}"},
+                timeout=TIMEOUT,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Failed to close session %s: %s", session_id, exc)
+
+
+    def main() -> None:
+        agi = asterisk.agi.AGI()
+        agi.answer()
+
+        credential = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("HUMAIN_CREDENTIAL")
+        if not credential:
+            agi.verbose("humain_kiosk: no credential provided — hanging up", level=1)
+            agi.hangup()
+            return
+
+        # Open a Humain Kiosk voice session
+        try:
+            session_id = open_session(credential)
+        except requests.HTTPError as exc:
+            log.error("Failed to open Humain session: %s", exc)
+            agi.verbose(f"humain_kiosk: API error {exc.response.status_code} — hanging up", level=1)
+            agi.hangup()
+            return
+
+        log.info("Opened session %s for channel %s", session_id, agi.env.get("agi_channel"))
+        agi.verbose(f"humain_kiosk: session {session_id} opened", level=1)
+
+        try:
+            # Bridge audio: Dial the session through the Humain SIP gateway.
+            # The gateway maps the session_id to the open voice session.
+            # Audio flows bidirectionally: caller ↔ Asterisk RTP ↔ Humain gateway ↔ AI pipeline.
+            agi.execute(
+                "Dial",
+                f"PJSIP/{session_id}@humain-endpoint",
+                "120",  # timeout in seconds
+                "gH",   # g = continue dialplan on hangup; H = allow caller to hang up with #
+            )
+        finally:
+            close_session(credential, session_id)
+            log.info("Closed session %s", session_id)
+            agi.verbose(f"humain_kiosk: session {session_id} closed", level=1)
+
+
+    if __name__ == "__main__":
+        main()
+    ```
+  </Step>
+
+  <Step title="Add the dialplan extension">
+    In `/etc/asterisk/extensions.conf`, add a context that routes inbound calls through the
+    AGI script:
+
+    ```ini
+    [humain-kiosk]
+    ; Route any inbound DID to the Humain Kiosk AI.
+    ; The credential is passed as argv[1] to the AGI script.
+    exten => _X.,1,NoOp(Routing ${EXTEN} to Humain Kiosk)
+     same => n,Answer()
+     same => n,Wait(1)
+     same => n,AGI(humain_kiosk.py,hk_live_YOUR_TOKEN)
+     same => n,Hangup()
+
+    ; Optionally play a fallback message if the AGI fails
+    exten => failed,1,Playback(sorry-youre-having-problems)
+     same => n,Hangup()
+    ```
+
+    Point your inbound SIP trunk (or DID routing) at the `[humain-kiosk]` context.
+
+    Reload the dialplan:
+
+    ```bash
+    asterisk -rx "dialplan reload"
+    ```
+  </Step>
+
+  <Step title="Test the call">
+    Dial the DID number routed to `[humain-kiosk]`. Watch the Asterisk console and your log
+    file:
+
+    ```bash
+    # Asterisk full console (verbose level 3)
+    asterisk -rx "core set verbose 3"
+
+    # AGI script log
+    tail -f /var/log/asterisk/humain_kiosk.log
+    ```
+
+    You should see:
+    - `humain_kiosk: session hk_sess_… opened`
+    - The Humain AI greeting playing to the caller
+    - `humain_kiosk: session hk_sess_… closed` on hang-up
+  </Step>
+</Steps>
+
+---
+
+## Handling DTMF before connecting
+
+<Accordion title="Play an IVR menu before the AI takes over">
+  Use Asterisk's `Read()` application to collect a DTMF digit, then branch to the AI only if
+  the caller chooses it:
+
+  ```ini
+  [humain-kiosk-ivr]
+  exten => _X.,1,Answer()
+   same => n,Read(CHOICE,ivr-press-1-for-ai,1,,2,5)
+   same => n,GotoIf($["${CHOICE}" = "1"]?ai)
+   same => n,Dial(PJSIP/${EXTEN}@live-agent-endpoint,60)
+   same => n,Hangup()
+
+  exten => _X.,n(ai),AGI(humain_kiosk.py,hk_live_YOUR_TOKEN)
+   same => n,Hangup()
+  ```
+</Accordion>
+
+<Accordion title="Pass caller metadata to the session">
+  The AGI script has access to all Asterisk channel variables. You can pass caller ID and DID
+  information to the session by extending `open_session()` with a `metadata` payload:
+
+  ```python
+  def open_session(credential: str, caller_id: str, did: str) -> str:
+      resp = requests.post(
+          f"{API_BASE}/v1/sessions",
+          json={
+              "mode": "voip",
+              "metadata": {
+                  "caller_id": caller_id,
+                  "did": did,
+              },
+          },
+          headers={"Authorization": f"Bearer {credential}"},
+          timeout=TIMEOUT,
+      )
+      resp.raise_for_status()
+      return resp.json()["session_id"]
+  ```
+
+  Then in `main()`:
+
+  ```python
+  caller_id = agi.env.get("agi_callerid", "unknown")
+  did       = agi.env.get("agi_dnid",     "unknown")
+  session_id = open_session(credential, caller_id, did)
+  ```
+
+  The metadata is available in your kiosk's action endpoints as `session.metadata`.
+</Accordion>
+
+---
+
+## ARI alternative
+
+If you prefer a more programmatic approach — handling multiple calls in a single process,
+reacting to mid-call events, or dynamically building bridges — see the
+[Asterisk ARI integration](/voip/asterisk-ari) guide.

@@ -1,0 +1,174 @@
+---
+title: "Vue"
+description: "useKioskSession composable and KioskChat / KioskVoice components for Vue 3 and Nuxt."
+icon: "puzzle-piece"
+---
+
+import InstallJs from '/snippets/install-js.mdx';
+import SandboxTip from '/snippets/sandbox-tip.mdx';
+import CredentialWarning from '/snippets/credential-warning.mdx';
+
+## Install
+
+<InstallJs />
+
+Import from the Vue sub-package:
+
+```typescript
+import { useKioskSession, KioskChat, KioskVoice } from "@humain/kiosk-js/vue"
+```
+
+<SandboxTip />
+
+## The composable
+
+`useKioskSession` is the core primitive. Use it when you need full control over the chat UI.
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue"
+import { useKioskSession } from "@humain/kiosk-js/vue"
+
+const { session, status, openSession, closeSession, sendMessage, stream } =
+  useKioskSession({
+    credential: "hk_live_your_credential_here",
+    mode: "sandbox",
+  })
+
+const messages = ref<Array<{ role: string; content: string }>>([])
+const input = ref("")
+
+async function send() {
+  const text = input.value.trim()
+  if (!text || !session.value) return
+  input.value = ""
+  messages.value.push({ role: "user", content: text })
+
+  let buffer = ""
+  messages.value.push({ role: "assistant", content: "" })
+
+  for await (const event of stream(text)) {
+    if (event.type === "chunk") {
+      buffer += event.content
+      messages.value[messages.value.length - 1].content = buffer
+    }
+  }
+}
+</script>
+
+<template>
+  <div>
+    <button v-if="status === 'idle'" @click="openSession">Start chat</button>
+    <div v-for="(msg, i) in messages" :key="i" :class="msg.role">
+      {{ msg.content }}
+    </div>
+    <input v-if="status === 'open'" v-model="input" @keydown.enter="send" />
+    <button v-if="status === 'open'" @click="closeSession">End</button>
+  </div>
+</template>
+```
+
+### Composable return values
+
+| Name | Type | Description |
+|---|---|---|
+| `session` | `Ref<Session \| null>` | The active session, or `null` |
+| `status` | `Ref<SessionStatus>` | `"idle"` \| `"opening"` \| `"open"` \| `"closing"` \| `"error"` |
+| `openSession` | `() => Promise<void>` | Open a new text session |
+| `closeSession` | `() => Promise<void>` | Close the current session |
+| `sendMessage` | `(input: string) => Promise<MessageResponse>` | Send and await the full response |
+| `stream` | `(input: string) => AsyncIterable<StreamEvent>` | Send and stream chunks |
+| `error` | `Ref<KioskError \| null>` | Most recent error, or `null` |
+
+## Drop-in components
+
+For most use cases the pre-built components are the fastest path.
+
+### `<KioskChat>`
+
+```vue
+<script setup lang="ts">
+import { KioskChat } from "@humain/kiosk-js/vue"
+</script>
+
+<template>
+  <KioskChat
+    credential="hk_live_your_credential_here"
+    mode="sandbox"
+    placeholder="Ask me anything…"
+    @message="(msg) => console.log('User:', msg)"
+    @response="(res) => console.log('AI:', res)"
+  />
+</template>
+```
+
+### `<KioskVoice>`
+
+```vue
+<script setup lang="ts">
+import { KioskVoice } from "@humain/kiosk-js/vue"
+</script>
+
+<template>
+  <KioskVoice
+    credential="hk_live_your_credential_here"
+    mode="sandbox"
+    @transcript="(text) => console.log('Heard:', text)"
+    @response="(text) => console.log('AI:', text)"
+  />
+</template>
+```
+
+Both components emit the same events as their React counterparts: `open`, `close`, `message`,
+`response`, `error`, `status-change`.
+
+## Advanced topics
+
+<AccordionGroup>
+  <Accordion title="Nuxt.js usage">
+    The Humain SDK uses browser APIs (WebSocket, WebRTC). In Nuxt, restrict these components
+    to client-side rendering:
+
+    ```vue
+    <!-- pages/support.vue -->
+    <template>
+      <ClientOnly>
+        <KioskChat credential="hk_live_your_credential_here" />
+        <template #fallback>
+          <p>Loading chat…</p>
+        </template>
+      </ClientOnly>
+    </template>
+    ```
+
+    Or use the `.client.vue` file naming convention to mark the entire component as
+    client-only — Nuxt will not attempt to SSR it.
+
+    For credentials, store your live token in `.env` and access it via `useRuntimeConfig()`.
+    Do not expose live credentials in `NUXT_PUBLIC_*` variables.
+  </Accordion>
+  <Accordion title="Pinia integration">
+    To share session state across multiple components, store the session in a Pinia store:
+
+    ```typescript
+    import { defineStore } from "pinia"
+    import { HumainKioskClient } from "@humain/kiosk-js"
+
+    export const useKioskStore = defineStore("kiosk", () => {
+      const client = new HumainKioskClient({ credential: import.meta.env.VITE_HUMAIN_TOKEN })
+      const session = ref(null)
+      const status = ref("idle")
+
+      async function openSession() {
+        status.value = "opening"
+        session.value = await client.openSession()
+        status.value = "open"
+      }
+
+      return { session, status, openSession }
+    })
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<CredentialWarning />

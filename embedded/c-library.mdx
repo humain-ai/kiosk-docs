@@ -1,0 +1,252 @@
+---
+title: "C library reference"
+description: "Complete kiosk.h API reference — configuration, session lifecycle, streaming, error codes, memory model, and thread safety."
+icon: "book"
+mode: "wide"
+---
+
+The `kiosk-c` library is a C99 client for the Humain Kiosk Device API. It requires
+**libcurl >= 7.68.0** and provides both blocking and streaming message APIs.
+
+Source and prebuilt binaries: [github.com/humain/kiosk-c](https://github.com/humain/kiosk-c)
+
+---
+
+## Build and install
+
+```bash
+git clone https://github.com/humain/kiosk-c.git
+cd kiosk-c
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+sudo cmake --install build
+```
+
+Link your application against `libkiosk` and `libcurl`:
+
+```bash
+gcc my_app.c -lkiosk -lcurl -o my_app
+```
+
+Or in CMake:
+
+```cmake
+find_package(kiosk REQUIRED)
+target_link_libraries(my_target PRIVATE kiosk::kiosk)
+```
+
+---
+
+## Minimal complete example
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include "kiosk.h"
+
+int main(void) {
+    const char *credential = getenv("HUMAIN_CREDENTIAL");
+    if (!credential) {
+        fprintf(stderr, "HUMAIN_CREDENTIAL not set\n");
+        return 1;
+    }
+
+    kiosk_config_t cfg = {0};
+    cfg.credential = credential;
+
+    kiosk_client_t *client = kiosk_client_create(&cfg);
+    if (!client) {
+        fprintf(stderr, "Failed to create client\n");
+        return 1;
+    }
+
+    kiosk_session_t *session = NULL;
+    kiosk_error_t err = kiosk_session_open(client, KIOSK_SESSION_TEXT, &session);
+    if (err != KIOSK_OK) {
+        fprintf(stderr, "open: %s\n", kiosk_error_string(err));
+        kiosk_client_destroy(client);
+        return 1;
+    }
+
+    char response[4096];
+    size_t response_len = 0;
+    err = kiosk_session_message(session, "Hello!", response, sizeof(response), &response_len);
+    if (err == KIOSK_OK) {
+        printf("AI: %.*s\n", (int)response_len, response);
+    } else {
+        fprintf(stderr, "message: %s\n", kiosk_error_string(err));
+    }
+
+    kiosk_session_close(session);
+    kiosk_client_destroy(client);
+    return (err == KIOSK_OK) ? 0 : 1;
+}
+```
+
+---
+
+## Streaming example
+
+```c
+#include <stdio.h>
+#include "kiosk.h"
+
+static int on_chunk(const char *chunk, size_t chunk_len, void *userdata) {
+    (void)userdata;
+    fwrite(chunk, 1, chunk_len, stdout);
+    fflush(stdout);
+    return 0; /* return non-zero to cancel the stream early */
+}
+
+int main(void) {
+    kiosk_config_t cfg = { .credential = getenv("HUMAIN_CREDENTIAL") };
+    kiosk_client_t *client = kiosk_client_create(&cfg);
+
+    kiosk_session_t *session = NULL;
+    kiosk_session_open(client, KIOSK_SESSION_TEXT, &session);
+
+    kiosk_session_stream(session, "Tell me about our opening hours.", on_chunk, NULL);
+    printf("\n");
+
+    kiosk_session_close(session);
+    kiosk_client_destroy(client);
+    return 0;
+}
+```
+
+---
+
+## Error handling
+
+```c
+kiosk_error_t err = kiosk_session_message(session, input, buf, sizeof(buf), &len);
+switch (err) {
+    case KIOSK_OK:
+        /* success */
+        break;
+    case KIOSK_ERR_RATE_LIMITED: {
+        int wait_secs = kiosk_retry_after(session);
+        fprintf(stderr, "Rate limited — retry after %d seconds\n", wait_secs);
+        sleep((unsigned)wait_secs);
+        /* retry ... */
+        break;
+    }
+    case KIOSK_ERR_SESSION_ENDED:
+        /* session expired — open a new one */
+        kiosk_session_close(session);
+        kiosk_session_open(client, KIOSK_SESSION_TEXT, &session);
+        break;
+    case KIOSK_ERR_NETWORK:
+    case KIOSK_ERR_TIMEOUT:
+        fprintf(stderr, "Transient error: %s — retrying\n", kiosk_error_string(err));
+        break;
+    default:
+        fprintf(stderr, "Fatal error: %s\n", kiosk_error_string(err));
+        break;
+}
+```
+
+---
+
+## `kiosk_config_t` fields
+
+<ParamField body="credential" type="const char *" required>
+  Device API credential in the form `hk_live_XXXXXXXXXXXXXXXXXX`. Read from an environment
+  variable — never hard-code in source files.
+
+  ```c
+  cfg.credential = getenv("HUMAIN_CREDENTIAL");
+  ```
+</ParamField>
+
+<ParamField body="base_url" type="const char *" default="https://api.humain.ai">
+  Override the API base URL. Set to `"https://sandbox.api.humain.ai"` during development, or
+  leave as `NULL` to use the production endpoint.
+</ParamField>
+
+<ParamField body="timeout_ms" type="int" default="30000">
+  HTTP request timeout in milliseconds. Set to `0` to use the default (30 000 ms).
+  Streaming requests use this timeout per chunk, not for the entire stream.
+</ParamField>
+
+<ParamField body="max_retries" type="int" default="3">
+  Maximum number of automatic retries for `KIOSK_ERR_NETWORK` and `KIOSK_ERR_TIMEOUT` errors.
+  Retries use exponential back-off with jitter capped at 30 seconds. Set to `0` to disable
+  automatic retries.
+</ParamField>
+
+<ParamField body="sandbox" type="int" default="0">
+  When non-zero, routes all requests to the sandbox endpoint regardless of `base_url`. Sandbox
+  responses are instant and consume no AI credits.
+</ParamField>
+
+---
+
+## Error codes
+
+| Code | Value | Meaning |
+|---|---|---|
+| `KIOSK_OK` | 0 | Success |
+| `KIOSK_ERR_INVALID_ARG` | 1 | A required argument was NULL or invalid |
+| `KIOSK_ERR_NETWORK` | 2 | DNS, TCP, or TLS failure |
+| `KIOSK_ERR_AUTH` | 3 | Credential missing, malformed, or revoked (HTTP 401) |
+| `KIOSK_ERR_INACTIVE` | 4 | Kiosk is disabled in the admin panel (HTTP 403) |
+| `KIOSK_ERR_BLOCKED` | 5 | Request blocked by a guardrail rule (HTTP 403) |
+| `KIOSK_ERR_RATE_LIMITED` | 6 | Rate limit exceeded — call `kiosk_retry_after()` (HTTP 429) |
+| `KIOSK_ERR_REJECTED` | 7 | Message rejected by content policy (HTTP 422) |
+| `KIOSK_ERR_SESSION_ENDED` | 8 | Session already closed (HTTP 410) |
+| `KIOSK_ERR_PROVIDER` | 9 | Upstream AI provider error (HTTP 502) |
+| `KIOSK_ERR_PLAN_LIMIT` | 10 | Workspace plan limit reached (HTTP 402) |
+| `KIOSK_ERR_INTERNAL` | 11 | Unexpected server error (HTTP 5xx) |
+| `KIOSK_ERR_TIMEOUT` | 12 | Request or connection timed out |
+| `KIOSK_ERR_OUT_OF_MEMORY` | 13 | Memory allocation failed |
+
+---
+
+## Memory model
+
+<Accordion title="Ownership and buffer sizing">
+  **Client and session handles** — the library allocates these internally.
+  `kiosk_client_destroy()` frees the client; `kiosk_session_close()` frees the session.
+  Never free these pointers yourself.
+
+  **Response buffers** — for `kiosk_session_message()`, the caller provides a stack- or
+  heap-allocated buffer. The library writes the NUL-terminated response into it and never
+  allocates additional memory for the response. If the response does not fit,
+  `KIOSK_ERR_OUT_OF_MEMORY` is returned and the buffer contains a partial response.
+
+  **Recommended buffer sizes:**
+
+  | Use case | Minimum | Recommended |
+  |---|---|---|
+  | Short Q&A responses | 1 KB | 4 KB |
+  | Detailed product descriptions | 4 KB | 16 KB |
+  | Long-form content | 16 KB | 64 KB |
+
+  **Streaming** — `kiosk_session_stream()` allocates only a small internal CURL write buffer.
+  The `chunk` pointer passed to your callback is valid only for the duration of that callback
+  invocation; copy it if you need to retain the data.
+
+  **`kiosk_config_t`** — the struct is copied by `kiosk_client_create()`. You may free or
+  reuse the config struct immediately after that call returns. The `credential` and `base_url`
+  strings are copied — you do not need to keep them alive.
+</Accordion>
+
+## Thread safety
+
+<Accordion title="Thread safety guarantees">
+  | Object | Thread safety |
+  |---|---|
+  | `kiosk_client_t` | Safe to call `kiosk_session_open()` concurrently from multiple threads |
+  | `kiosk_session_t` | **Not thread-safe** — one session must be used from one thread at a time |
+  | `kiosk_session_stream()` | Blocks the calling thread. Call from a dedicated thread if needed |
+  | `kiosk_error_string()` | Thread-safe — returns a pointer to a static string |
+  | `kiosk_version()` | Thread-safe — returns a pointer to a static string |
+
+  To handle concurrent conversations, open one session per conversation (not one session per
+  thread). Multiple sessions can be open simultaneously on a single client.
+
+  `kiosk_session_stream()` is safe to cancel from another thread by returning a non-zero value
+  from the callback — but the callback itself is always invoked on the thread that called
+  `kiosk_session_stream()`.
+</Accordion>

@@ -1,0 +1,109 @@
+---
+title: "Swift"
+description: "Native iOS and macOS SDK for Humain Kiosk — text, streaming, and WebRTC voice."
+icon: "smartphone"
+---
+
+import SdkSandboxNote from '/snippets/sdk-sandbox-note.mdx';
+
+The Swift SDK wraps the Humain Device API with native Swift async/await and `AsyncSequence`
+patterns. It is the only server-side SDK that includes WebRTC voice — all the audio session
+management is handled inside the SDK without external dependencies.
+
+For a complete integration walkthrough — including Xcode setup, SwiftUI examples, microphone
+permission handling, and AVAudioSession configuration — see the
+[iOS guide](/mobile/ios-swift).
+
+<SdkSandboxNote />
+
+---
+
+## Install
+
+In Xcode: **File → Add Package Dependencies** and enter:
+
+```
+https://github.com/humain-ai/kiosk-swift
+```
+
+Or add to `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/humain-ai/kiosk-swift", from: "1.0.0"),
+],
+targets: [
+    .target(name: "MyApp", dependencies: ["HumainKiosk"]),
+]
+```
+
+---
+
+## Quick example
+
+```swift
+import HumainKiosk
+
+let client = KioskClient(credential: "hk_live_your_credential_here")
+
+let session = try await client.openSession()
+let response = try await session.sendMessage("What are your opening hours?")
+print(response.text)
+try await session.close()
+```
+
+---
+
+## `KioskClient` options
+
+```swift
+let client = KioskClient(
+    credential: "hk_live_your_credential_here",
+    mode: .live,
+    timeout: 30,
+    maxRetries: 2
+)
+```
+
+<ParamField body="credential" type="String" required>
+  Your device credential token in `hk_live_…` format. Issue credentials from the Humain
+  admin panel under **Kiosk → Credentials → Issue new credential**.
+</ParamField>
+
+<ParamField body="mode" type="KioskMode" default=".live">
+  `.sandbox` returns instant stub responses without consuming AI credits. Use `.live` for
+  production.
+</ParamField>
+
+<ParamField body="timeout" type="TimeInterval" default="30">
+  Request timeout in seconds. Applied to the session open call and each `sendMessage()` call.
+</ParamField>
+
+<ParamField body="maxRetries" type="Int" default="2">
+  Number of automatic retries on provider errors (`503`). Uses exponential back-off starting
+  at 1 second.
+</ParamField>
+
+---
+
+## Error types
+
+<ResponseField name="KioskError.authentication(message:)" type="Error">
+  `401` — invalid or revoked credential.
+</ResponseField>
+
+<ResponseField name="KioskError.rateLimited(retryAfter:)" type="Error">
+  `429` — too many requests. The `retryAfter` value is the minimum wait in seconds.
+</ResponseField>
+
+<ResponseField name="KioskError.providerUnavailable(retryable:)" type="Error">
+  `503` — LLM temporarily unavailable. `retryable: true` means safe to retry with back-off.
+</ResponseField>
+
+<ResponseField name="KioskError.microphonePermissionDenied" type="Error">
+  The user denied microphone access. The app should guide the user to Settings to re-enable.
+</ResponseField>
+
+<ResponseField name="KioskError.sessionEnded" type="Error">
+  Returned when calling `sendMessage()` or `stream()` on a closed session.
+</ResponseField>

@@ -1,0 +1,193 @@
+---
+title: "VoIP troubleshooting"
+description: "Diagnose and fix the most common issues with Humain Kiosk SIP gateway integrations."
+icon: "wrench"
+---
+
+This page covers the five most common problems reported when integrating with the Humain SIP
+gateway. Work through each symptom systematically — most issues resolve at the codec or
+credential step.
+
+---
+
+<AccordionGroup>
+  <Accordion title="One-way audio (caller can hear AI but AI cannot hear caller, or vice versa)">
+    One-way audio almost always means the RTP media stream is blocked or arriving at the wrong
+    address. The SIP signalling completed (you got a `200 OK`) but the media path is broken.
+
+    **Checklist:**
+
+    1. **NAT traversal** — Is your PBX behind NAT? The `Contact` and `Via` headers in your SIP
+       `INVITE` must contain your public IP, not a private `192.168.x.x` address. Configure
+       `externip` (Asterisk) or `ext-rtp-ip` / `ext-sip-ip` (FreeSWITCH) to your public IP.
+
+    2. **Firewall — RTP ports** — The Humain gateway sends RTP from the range `10000–20000 UDP`.
+       Your firewall must allow inbound UDP on the ports listed in the SDP `m=audio` line, and
+       outbound UDP to `sip.humain.ai` on the same range.
+
+    3. **Codec mismatch** — If both sides claim to support a codec but disagree on the payload
+       type number, media is silently discarded. Capture the SDP exchange with `sngrep` and
+       verify the `a=rtpmap` lines match.
+
+    4. **SRTP key mismatch** — If you negotiated SRTP, verify the `a=crypto` attribute in the
+       SDP answer is being applied. A key mismatch results in silent media on one or both sides.
+
+    **Capture RTP to diagnose:**
+    ```bash
+    # On your Asterisk server — capture RTP for one call
+    tcpdump -i any -w /tmp/capture.pcap udp portrange 10000-20000
+    # Open in Wireshark: Telephony → RTP → RTP Streams
+    ```
+  </Accordion>
+
+  <Accordion title="AI does not respond (call connects but the AI is silent)">
+    The call connected and audio is flowing but the AI never speaks. This typically means the
+    session was not opened before the SIP `INVITE`, or the session was already closed.
+
+    **Checklist:**
+
+    1. **Session opened before INVITE** — The Humain SIP gateway maps an incoming `INVITE` to an
+       open session using the SIP user part (the `session_id`). If you dial
+       `sip:hk_sess_XYZ@sip.humain.ai` but the session `hk_sess_XYZ` was never opened, the
+       gateway rejects or drops the call. Ensure `POST /v1/sessions` succeeds and returns the
+       `session_id` before you trigger the `Dial` or transfer.
+
+    2. **Credential error** — Check your server logs for a `401 Unauthorized` or `UNAUTHENTICATED`
+       error from the Humain API. The session will not open with an invalid or revoked credential.
+
+    3. **Session already ended** — If the session was accidentally closed (e.g., a timeout or a
+       prior error path that called `/end`), the gateway will reject audio. Open a fresh session.
+
+    4. **Wrong session mode** — Sessions opened with `mode: "text"` or `mode: "voice"` (WebRTC)
+       will not accept SIP audio. Always open sessions with `mode: "voip"` for SIP integrations.
+
+    **Test session opening independently:**
+    ```bash
+    curl -X POST https://api.humain.ai/v1/sessions \
+      -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"mode":"voip"}' \
+      | jq .
+    # Expect: {"session_id": "hk_sess_…", "status": "open"}
+    ```
+  </Accordion>
+
+  <Accordion title="Poor transcription quality (AI misunderstands caller)">
+    Transcription quality is a function of audio bandwidth, background noise, and codec choice.
+
+    **Quick wins (in order of impact):**
+
+    1. **Switch to G.722** — If you are using G.711 (8 kHz), upgrade to G.722 (16 kHz). The
+       wider audio bandwidth significantly improves Deepgram's word-error rate, especially for
+       accented speech and proper nouns. See the [codec guide](/voip/codec-guide) for
+       configuration examples.
+
+    2. **Check for echo** — Echo from a badly configured analogue gateway or ATA degrades STT.
+       Enable Acoustic Echo Cancellation (AEC) on your ATA or softphone.
+
+    3. **Check packet loss** — High packet loss fragments speech. Run a quick MOS test:
+       ```bash
+       # Measure RTP jitter and loss with iperf3 (UDP)
+       iperf3 -u -c sip.humain.ai -p 5201 -b 64K -t 30
+       ```
+       If packet loss exceeds 1%, investigate your network path.
+
+    4. **Avoid transcoding chains** — G.729 → G.711 → Opus involves two lossy conversions. Use
+       a single codec end-to-end where possible.
+
+    5. **Kiosk language setting** — Verify the kiosk is configured for the correct language in
+       the admin panel (**Kiosk → Voice settings → Language**). A kiosk set to English will
+       produce high error rates on Spanish input regardless of audio quality.
+  </Accordion>
+
+  <Accordion title="SIP registration fails (trunk shows 'unregistered' or 408 timeout)">
+    The SIP trunk cannot register with `sip.humain.ai`. This is almost always a network or
+    credential issue.
+
+    **Checklist:**
+
+    1. **DNS resolution** — Verify `sip.humain.ai` resolves from your server:
+       ```bash
+       dig sip.humain.ai
+       nslookup sip.humain.ai
+       ```
+       If DNS fails, check your server's resolver configuration.
+
+    2. **Firewall — SIP port** — Port `5061 TCP` (TLS) must be open outbound to `sip.humain.ai`.
+       Test with:
+       ```bash
+       openssl s_client -connect sip.humain.ai:5061
+       # Should show the TLS handshake and certificate
+       ```
+
+    3. **TLS certificate** — The Humain gateway uses a publicly trusted TLS certificate. If your
+       PBX has a misconfigured CA bundle it may reject the handshake. On Asterisk:
+       ```ini
+       ; /etc/asterisk/pjsip.conf
+       [transport-tls]
+       type=transport
+       protocol=tls
+       ca_list_file=/etc/ssl/certs/ca-certificates.crt
+       verify_server=yes
+       ```
+
+    4. **Credential format** — The SIP `username` and `password` must both be set to your full
+       `hk_live_…` token. Using only the prefix or a truncated token will cause `403 Forbidden`.
+
+    5. **Clock skew** — Some SIP implementations include a `Date` header. If your server clock
+       is more than 60 seconds off UTC, authentication may fail. Run `timedatectl` to verify.
+  </Accordion>
+
+  <Accordion title="Call drops after 30–60 seconds (session timeout)">
+    If every call drops at a predictable time boundary, the session is being abandoned by the
+    server before the call ends.
+
+    **Causes:**
+
+    - **Session inactivity timeout** — Humain sessions in `voip` mode time out after **30 minutes**
+      of inactivity (no audio received). If your PBX holds a call on mute for longer than this,
+      the session closes and the gateway drops the RTP stream. Solution: implement a periodic
+      comfort noise or re-`INVITE` to keep the media path active.
+
+    - **PBX session timer (RFC 4028)** — Some PBXes enable SIP Session Timers by default and
+      will send a re-`INVITE` every 30 or 90 seconds to refresh the session. Ensure the Humain
+      gateway's `200 OK` to the re-`INVITE` is not being blocked by a firewall or ALG.
+
+    - **NAT mapping expiry** — Consumer-grade NAT devices expire UDP mappings after 30–60 seconds
+      of silence. Enable **SIP keep-alives** (OPTIONS ping) on your PBX, or switch to TCP/TLS
+      transport which maintains a persistent connection.
+
+    **Asterisk keep-alive:**
+    ```ini
+    [humain-aor]
+    type=aor
+    contact=sip:sip.humain.ai:5061
+    qualify_frequency=30   ; Send OPTIONS every 30 s
+    ```
+
+    **Disable problematic SIP ALG** on your router/firewall if it is rewriting SIP packets.
+    SIP ALGs on consumer routers are a frequent source of intermittent call drops and one-way
+    audio.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Capturing a SIP trace
+
+For issues not covered above, capture a full SIP trace and share it with
+[support@humain.ai](mailto:support@humain.ai):
+
+```bash
+# sngrep — interactive SIP capture (install with: apt install sngrep)
+sngrep -I /tmp/capture.pcap host sip.humain.ai
+
+# Or capture raw packets for offline analysis
+tcpdump -i any -w /tmp/sip.pcap host sip.humain.ai
+```
+
+Include the following in your support request:
+- The SIP trace (`.pcap` or `sngrep` export)
+- Your PBX type and version
+- The codec configured on the trunk
+- The session_id of a failed call (from your server logs)

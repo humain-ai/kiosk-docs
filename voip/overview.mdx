@@ -1,0 +1,80 @@
+---
+title: "VoIP and telephony integration"
+description: "Bridge SIP trunks, PBX systems, and cloud telephony providers to Humain Kiosk AI sessions."
+icon: "phone"
+---
+
+import VoipCredentialNote from '/snippets/voip-credential-note.mdx';
+
+The Humain SIP gateway bridges telephone infrastructure to AI conversations. An incoming phone
+call — from a PSTN line, a cloud telephony provider, or an IP phone — becomes a Humain Kiosk
+session. Your PBX or CPaaS handles the telephone network; Humain handles the intelligence.
+
+<VoipCredentialNote />
+
+---
+
+## Choose your integration path
+
+<Columns cols={2}>
+  <Card title="Asterisk / FreePBX (technical)" icon="server" href="/voip/asterisk-agi">
+    Write a dialplan and AGI script to route calls to a Humain Kiosk session. Full control
+    over call flow, DTMF handling, and mid-call transfers.
+  </Card>
+  <Card title="FreePBX module (no-code)" icon="puzzle-piece" href="/plugins/freepbx">
+    Install a GUI module from the FreePBX Module Admin. Configure the Humain extension from
+    a form — no dialplan editing required.
+  </Card>
+  <Card title="3CX (no-code)" icon="headset" href="/plugins/3cx">
+    Install a CallFlow app from the 3CX App Marketplace. Route calls to the Humain AI from
+    any queue, IVR, or direct inward dial number.
+  </Card>
+  <Card title="Twilio / Vonage / Telnyx" icon="cloud" href="/voip/twilio">
+    Route cloud telephony calls to a Humain Kiosk session via webhooks and the provider's
+    audio streaming API.
+  </Card>
+  <Card title="Generic SIP trunk" icon="network-wired" href="/voip/sip-gateway">
+    Register any SIP-capable endpoint directly to the Humain SIP gateway. Works with any
+    standards-compliant PBX, softphone, or ATA.
+  </Card>
+</Columns>
+
+---
+
+## Call architecture
+
+Every integration path converges on the same architecture. Your telephony layer sends a SIP
+`INVITE` to the Humain gateway; the gateway opens a voice session with the AI pipeline and
+bridges bidirectional audio.
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant PBX as PBX / CPaaS
+    participant HumainGateway as Humain SIP Gateway
+    participant AI as AI Pipeline
+
+    Caller->>PBX: Places call
+    PBX->>HumainGateway: SIP INVITE
+    HumainGateway->>AI: Open voice session (WebRTC)
+    AI-->>HumainGateway: SDP answer
+    HumainGateway-->>PBX: 200 OK + SDP
+    Note over Caller,AI: Bidirectional audio — G.711 / G.722 / Opus
+    Caller->>PBX: Hangs up
+    PBX->>HumainGateway: SIP BYE
+    HumainGateway->>AI: Close session
+```
+
+<Info>
+  The SIP gateway handles all codec transcoding and NAT traversal. Your PBX does not need to
+  support Opus — G.711 (PCMU/PCMA) and G.722 are both supported on the SIP side. See the
+  [codec guide](/voip/codec-guide) for the full compatibility matrix.
+</Info>
+
+---
+
+## Conceptual background
+
+For a deeper look at how VoIP sessions work — the session flow diagram, codec table, and
+security requirements — see the [VoIP / SIP connection type](/connections/voip-sip) page in
+the Guides tab.

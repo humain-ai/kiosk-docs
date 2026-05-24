@@ -1,0 +1,208 @@
+---
+title: "Raspberry Pi"
+description: "Build, install, and run the Humain Kiosk C library on a Raspberry Pi (arm64, Raspberry Pi OS)."
+icon: "cpu"
+---
+
+This guide covers deploying the Humain Kiosk C library on a Raspberry Pi running Raspberry Pi OS
+(64-bit, Bookworm or later). By the end you will have a persistent voice-enabled kiosk service
+running under systemd, with auto-reconnect on network failure.
+
+For audio hardware recommendations — USB microphones, I²S HATs, and speaker amplifiers — see the
+[Audio hardware guide](/embedded/audio-hardware).
+
+---
+
+<Steps>
+  <Step title="Install dependencies">
+    Update the package list and install libcurl, build tools, and ALSA:
+
+    ```bash
+    sudo apt update && sudo apt install -y \
+        build-essential \
+        cmake \
+        libcurl4-openssl-dev \
+        libasound2-dev \
+        git
+    ```
+  </Step>
+
+  <Step title="Clone and build the library">
+    ```bash
+    git clone https://github.com/humain/kiosk-c.git
+    cd kiosk-c
+    cmake -B build -DCMAKE_BUILD_TYPE=Release
+    cmake --build build --parallel
+    sudo cmake --install build
+    ```
+
+    Verify the install:
+
+    ```bash
+    pkg-config --modversion kiosk
+    # 1.0.0
+    ```
+  </Step>
+
+  <Step title="Store your credential securely">
+    Write the credential to a root-readable environment file:
+
+    ```bash
+    sudo bash -c 'echo "HUMAIN_CREDENTIAL=hk_live_your_token_here" > /etc/humain.env'
+    sudo chmod 600 /etc/humain.env
+    ```
+
+    <Warning>
+      The credential is shown only once in the admin panel. Store it immediately. If lost,
+      revoke it and issue a new one — do not share credentials across devices.
+    </Warning>
+  </Step>
+
+  <Step title="Create your kiosk application">
+    Write a minimal kiosk app that reads voice input from ALSA and streams responses:
+
+    ```c
+    /* /usr/local/bin/humain-kiosk.c */
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <string.h>
+    #include <signal.h>
+    #include "kiosk.h"
+
+    static volatile int running = 1;
+    static kiosk_session_t *g_session = NULL;
+
+    static void handle_signal(int sig) {
+        (void)sig;
+        running = 0;
+    }
+
+    static int print_chunk(const char *chunk, size_t len, void *userdata) {
+        (void)userdata;
+        fwrite(chunk, 1, len, stdout);
+        fflush(stdout);
+        return running ? 0 : 1; /* cancel stream if signal received */
+    }
+
+    int main(void) {
+        signal(SIGINT, handle_signal);
+        signal(SIGTERM, handle_signal);
+
+        kiosk_config_t cfg = { .credential = getenv("HUMAIN_CREDENTIAL") };
+        kiosk_client_t *client = kiosk_client_create(&cfg);
+        if (!client) { fputs("Failed to create client\n", stderr); return 1; }
+
+        kiosk_error_t err = kiosk_session_open(client, KIOSK_SESSION_TEXT, &g_session);
+        if (err != KIOSK_OK) {
+            fprintf(stderr, "Session open: %s\n", kiosk_error_string(err));
+            kiosk_client_destroy(client);
+            return 1;
+        }
+
+        char input[512];
+        while (running) {
+            printf("\nYou: ");
+            if (!fgets(input, sizeof(input), stdin)) break;
+            input[strcspn(input, "\n")] = '\0';
+            if (!*input) continue;
+
+            printf("AI: ");
+            err = kiosk_session_stream(g_session, input, print_chunk, NULL);
+            printf("\n");
+
+            if (err == KIOSK_ERR_SESSION_ENDED) {
+                /* Server ended session — reopen */
+                kiosk_session_close(g_session);
+                kiosk_session_open(client, KIOSK_SESSION_TEXT, &g_session);
+            }
+        }
+
+        kiosk_session_close(g_session);
+        kiosk_client_destroy(client);
+        return 0;
+    }
+    ```
+
+    Compile and install the binary:
+
+    ```bash
+    gcc humain-kiosk.c -lkiosk -lcurl -o humain-kiosk
+    sudo mv humain-kiosk /usr/local/bin/
+    ```
+  </Step>
+
+  <Step title="Create a systemd service">
+    Create `/etc/systemd/system/humain-kiosk.service`:
+
+    ```ini
+    [Unit]
+    Description=Humain Kiosk voice service
+    After=network-online.target sound.target
+    Wants=network-online.target
+
+    [Service]
+    Type=simple
+    EnvironmentFile=/etc/humain.env
+    ExecStart=/usr/local/bin/humain-kiosk
+    Restart=on-failure
+    RestartSec=5
+    # Run as a dedicated user (create with: adduser --system humain)
+    User=humain
+    Group=audio
+
+    # Security hardening
+    NoNewPrivileges=true
+    PrivateTmp=true
+    ProtectSystem=strict
+    ReadWritePaths=/var/log/humain
+
+    [Install]
+    WantedBy=multi-user.target
+    ```
+
+    Enable and start:
+
+    ```bash
+    sudo systemctl daemon-reload
+    sudo systemctl enable humain-kiosk
+    sudo systemctl start humain-kiosk
+    sudo systemctl status humain-kiosk
+    ```
+
+    View live logs:
+
+    ```bash
+    sudo journalctl -u humain-kiosk -f
+    ```
+  </Step>
+</Steps>
+
+---
+
+<Accordion title="Auto-reconnect on network loss">
+  The library retries transient network errors automatically (up to `max_retries` times with
+  exponential back-off). For persistent failure — e.g., the Pi loses Wi-Fi for more than
+  90 seconds — the systemd `Restart=on-failure` directive relaunches the process.
+
+  For more resilient applications, add an explicit reconnect loop:
+
+  ```c
+  static kiosk_error_t open_with_retry(kiosk_client_t *client, kiosk_session_t **out) {
+      int delay = 2;
+      for (int attempt = 0; attempt < 10; attempt++) {
+          kiosk_error_t err = kiosk_session_open(client, KIOSK_SESSION_TEXT, out);
+          if (err == KIOSK_OK) return KIOSK_OK;
+          if (err == KIOSK_ERR_AUTH || err == KIOSK_ERR_INACTIVE) return err; /* unrecoverable */
+          fprintf(stderr, "Reconnect attempt %d: %s — waiting %ds\n",
+                  attempt + 1, kiosk_error_string(err), delay);
+          sleep((unsigned)delay);
+          delay = delay < 60 ? delay * 2 : 60; /* cap at 60s */
+      }
+      return KIOSK_ERR_NETWORK;
+  }
+  ```
+
+  Call `open_with_retry()` both on startup and whenever `kiosk_session_message()` or
+  `kiosk_session_stream()` returns `KIOSK_ERR_NETWORK`, `KIOSK_ERR_TIMEOUT`, or
+  `KIOSK_ERR_SESSION_ENDED`.
+</Accordion>

@@ -1,0 +1,117 @@
+---
+title: "Authentication"
+description: "Every device request is authenticated with a long-lived bearer token issued from the admin panel."
+---
+
+## How it works
+
+The Humain device API uses **per-device bearer tokens**. Each physical device, website widget, or VoIP
+adapter gets its own credential. This lets you revoke a single device without affecting others, monitor
+usage per device, and apply rate limits at the credential level.
+
+```
+Authorization: Bearer hk_live_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCd123
+```
+
+<Warning>
+  Credentials are **long-lived** and are **never stored in plain text** on the server — only a
+  SHA-256 hash is persisted. The raw token is shown exactly once at creation time. Copy it
+  immediately and store it in a secret manager (e.g. AWS Secrets Manager, Vault, Doppler).
+</Warning>
+
+## Token format
+
+| Component | Value | Description |
+|---|---|---|
+| Prefix | `hk_live_` | Fixed 8-character prefix — identifies this as a live device token |
+| Body | 43 base64url chars | 32 cryptographically random bytes, URL-safe base64 encoded |
+| Total length | 51 characters | Constant — useful for validation |
+
+A valid token always matches `/^hk_live_[A-Za-z0-9\-_]{43}$/`.
+
+## Issuing credentials
+
+Credentials are managed in the admin panel under **Kiosk → Credentials**.
+
+<Steps>
+  <Step title="Open the admin panel">
+    Navigate to [app.humain.ai](https://app.humain.ai) and select your workspace.
+  </Step>
+  <Step title="Select a kiosk">
+    Open the kiosk you want to issue a credential for. One kiosk can have multiple active
+    credentials (e.g. one per device in a fleet).
+  </Step>
+  <Step title="Issue a new credential">
+    Click **Issue new credential**, give it a descriptive label (e.g. `lobby-terminal-01`),
+    and confirm.
+  </Step>
+  <Step title="Copy the token">
+    The raw token is displayed once. Copy it now — you cannot retrieve it later.
+  </Step>
+</Steps>
+
+## Using the token in code
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://api.humain.ai/v1/sessions \
+  -H "Authorization: Bearer hk_live_YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"text"}'
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.humain.ai/v1/sessions', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer hk_live_YOUR_TOKEN',
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ mode: 'text' }),
+});
+const { session_id } = await response.json();
+```
+
+```python Python
+import httpx
+
+client = httpx.Client(
+    base_url='https://api.humain.ai',
+    headers={'Authorization': 'Bearer hk_live_YOUR_TOKEN'},
+)
+
+resp = client.post('/v1/sessions', json={'mode': 'text'})
+session_id = resp.json()['session_id']
+```
+
+```go Go
+req, _ := http.NewRequest("POST", "https://api.humain.ai/v1/sessions",
+    strings.NewReader(`{"mode":"text"}`))
+req.Header.Set("Authorization", "Bearer hk_live_YOUR_TOKEN")
+req.Header.Set("Content-Type", "application/json")
+
+resp, err := http.DefaultClient.Do(req)
+```
+</CodeGroup>
+
+## Rotating credentials
+
+To rotate a credential (e.g. after a suspected leak):
+
+1. Issue a new credential from the admin panel.
+2. Deploy the new token to your device.
+3. Revoke the old credential — existing open sessions that used it will be terminated.
+
+<Note>
+  Revocation is immediate. The old token stops working as soon as you revoke it, regardless of
+  any cached sessions on the device.
+</Note>
+
+## Error responses
+
+| Situation | HTTP | Error code |
+|---|---|---|
+| Missing `Authorization` header | 401 | `UNAUTHENTICATED` |
+| Malformed token (wrong prefix, wrong length) | 401 | `UNAUTHENTICATED` |
+| Valid token but kiosk is not active | 403 | `KIOSK_INACTIVE` |
+| Credential blocked by FraudGuard | 403 | `CREDENTIAL_BLOCKED` |

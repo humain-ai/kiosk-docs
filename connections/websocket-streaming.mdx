@@ -1,0 +1,213 @@
+---
+title: "WebSocket — streaming"
+description: "Receive AI response tokens as they are generated. Eliminates the waiting spinner and makes your UI feel instant."
+---
+
+## Why streaming?
+
+With the REST endpoint, the device waits for the full AI response before it arrives. With WebSocket
+streaming, the device receives each token as soon as it is generated — typically within 300 ms of
+sending input. For a chat interface, this is the difference between a loading spinner and words
+appearing instantly on screen.
+
+## Wire protocol
+
+The WebSocket endpoint is at `GET /v1/sessions/{sid}/stream`. Upgrade to it with any standard
+WebSocket client. Authentication uses the same bearer token — pass it as a query parameter or in
+the `Authorization` header before the upgrade (browser `WebSocket` API does not support custom
+headers; use a query parameter in that case).
+
+### Sending a message
+
+Send a UTF-8 JSON text frame:
+
+```json
+{"input": "What are your opening hours?"}
+```
+
+### Receiving tokens
+
+The server sends a series of `token` frames followed by a single `done` frame:
+
+```json
+{"type": "token", "token": "We "}
+{"type": "token", "token": "are "}
+{"type": "token", "token": "open "}
+{"type": "token", "token": "Monday "}
+{"type": "token", "token": "to "}
+{"type": "token", "token": "Friday, "}
+{"type": "token", "token": "9 AM–6 PM."}
+{"type": "done", "actions_called": []}
+```
+
+Concatenate `token` fields from all `token` frames to reconstruct the full response.
+
+### Frame types
+
+<ResponseField name="type" type="string" required>
+  One of `token` or `done`.
+</ResponseField>
+
+<ResponseField name="token" type="string">
+  Present only when `type` is `token`. A fragment of the AI response — typically 1–5 words.
+</ResponseField>
+
+<ResponseField name="actions_called" type="string[]">
+  Present only when `type` is `done`. Names of action endpoints called during this turn.
+</ResponseField>
+
+### Error frames
+
+If the guardrail rejects input or a provider error occurs, the server sends a close frame with a
+`4xxx` WebSocket close code followed by a JSON reason string:
+
+| Close code | Reason |
+|---|---|
+| `4400` | `INPUT_REJECTED` — input blocked by a guardrail rule |
+| `4403` | `CREDENTIAL_BLOCKED` or `KIOSK_INACTIVE` |
+| `4429` | `RATE_LIMITED` — slow down |
+| `4503` | `PROVIDER_ERROR` — LLM unavailable, retry |
+
+## Browser integration
+
+<CodeGroup>
+```javascript JavaScript (browser)
+const BASE_URL = 'wss://api.humain.ai'; // wss:// for production, ws:// for local
+const token = 'hk_live_YOUR_TOKEN';
+
+// 1. Open a session first (HTTP POST)
+const { session_id } = await fetch(`https://api.humain.ai/v1/sessions`, {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ mode: 'text' }),
+}).then(r => r.json());
+
+// 2. Upgrade to WebSocket (token in query param — browsers can't set WS headers)
+const ws = new WebSocket(
+  `${BASE_URL}/v1/sessions/${session_id}/stream?token=${encodeURIComponent(token)}`
+);
+
+let fullResponse = '';
+
+ws.onopen = () => {
+  // 3. Send user input
+  ws.send(JSON.stringify({ input: 'What are your opening hours?' }));
+};
+
+ws.onmessage = (event) => {
+  const frame = JSON.parse(event.data);
+
+  if (frame.type === 'token') {
+    fullResponse += frame.token;
+    updateChatUI(fullResponse); // Append token to the visible text
+  }
+
+  if (frame.type === 'done') {
+    console.log('Turn complete. Actions called:', frame.actions_called);
+    // Ready for next user input
+  }
+};
+
+ws.onclose = (event) => {
+  if (event.code >= 4000) {
+    const reason = JSON.parse(event.reason ?? '{}');
+    console.error('Session error:', reason);
+  }
+};
+```
+
+```javascript Node.js (ws library)
+import WebSocket from 'ws';
+import fetch from 'node-fetch';
+
+const TOKEN = process.env.HUMAIN_TOKEN;
+const BASE = 'https://api.humain.ai';
+
+// 1. Open session
+const { session_id } = await fetch(`${BASE}/v1/sessions`, {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ mode: 'text' }),
+}).then(r => r.json());
+
+// 2. Connect WebSocket (Node can use custom headers)
+const ws = new WebSocket(`wss://api.humain.ai/v1/sessions/${session_id}/stream`, {
+  headers: { 'Authorization': `Bearer ${TOKEN}` },
+});
+
+ws.on('open', () => {
+  ws.send(JSON.stringify({ input: process.argv[2] ?? 'Hello!' }));
+});
+
+let output = '';
+ws.on('message', (data) => {
+  const frame = JSON.parse(data.toString());
+  if (frame.type === 'token') {
+    process.stdout.write(frame.token); // Stream to terminal
+    output += frame.token;
+  }
+  if (frame.type === 'done') {
+    console.log('\n\nDone. Actions:', frame.actions_called);
+    ws.close();
+  }
+});
+
+ws.on('close', (code, reason) => {
+  if (code >= 4000) console.error('Error close:', code, reason.toString());
+});
+```
+</CodeGroup>
+
+## Reconnection strategy
+
+WebSocket connections can drop due to network interruptions. Implement automatic reconnection with
+exponential back-off:
+
+```javascript
+class HumainStream {
+  #token;
+  #sessionId;
+  #ws = null;
+  #reconnectDelay = 1000;
+  #maxDelay = 30000;
+
+  constructor(token, sessionId) {
+    this.#token = token;
+    this.#sessionId = sessionId;
+  }
+
+  connect() {
+    this.#ws = new WebSocket(
+      `wss://api.humain.ai/v1/sessions/${this.#sessionId}/stream`
+        + `?token=${encodeURIComponent(this.#token)}`
+    );
+
+    this.#ws.onopen = () => {
+      this.#reconnectDelay = 1000; // Reset on successful connect
+      this.onopen?.();
+    };
+
+    this.#ws.onmessage = (e) => this.onmessage?.(JSON.parse(e.data));
+
+    this.#ws.onclose = (e) => {
+      if (e.code < 4000) {
+        // Normal close or network drop — reconnect
+        setTimeout(() => this.connect(), this.#reconnectDelay);
+        this.#reconnectDelay = Math.min(this.#reconnectDelay * 2, this.#maxDelay);
+      } else {
+        // Application-level error (4xxx) — don't reconnect
+        this.onerror?.(e);
+      }
+    };
+  }
+
+  send(input) {
+    this.#ws?.send(JSON.stringify({ input }));
+  }
+}
+```
+
+<Note>
+  When reconnecting mid-session, the server still has the conversation history — you do not need
+  to resend previous messages. Just send the next user input.
+</Note>
