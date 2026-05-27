@@ -80,6 +80,34 @@ wire up the SIP bridge.
   </Card>
 </Columns>
 
+---
+
+## C library voice sessions
+
+WebRTC voice sessions opened via `kiosk_voice_session_open()` cannot be tested from a browser.
+The `libdatachannel` ICE stack performs UDP hole-punching and DTLS handshakes that require
+a real network socket — not available in a browser sandbox.
+
+To test a voice session from your workstation before deploying to hardware:
+
+1. Install the library locally (`cmake -B build -DKIOSK_WITH_VOICE=ON && sudo cmake --install build`).
+2. Compile and run the minimal voice example from the [Raspberry Pi quickstart](/embedded/raspberry-pi#voice-session-quickstart) on your Linux development machine.
+3. Use a USB headset as the ALSA capture and playback device.
+
+```bash
+export HUMAIN_CREDENTIAL=hk_live_your_credential_here
+gcc pi-voice.c -lkiosk -lcurl -o pi-voice
+./pi-voice
+# [connecting]
+# [listening]
+# Voice session active — speak into the microphone. Press Ctrl+C to stop.
+```
+
+This verifies ICE connectivity, credential validity, and the full audio round-trip before you
+deploy to a Raspberry Pi or embedded Linux target.
+
+---
+
 ## Next steps
 
 - Read the [VoIP / SIP connection guide](/connections/voip-sip) for the full setup walkthrough.

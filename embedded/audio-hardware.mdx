@@ -29,6 +29,48 @@ For audio session configuration on iOS and Android, see
   significantly in noisy environments.
 </Note>
 
+### Connecting to the C library
+
+How you wire audio hardware to `kiosk-c` depends on the interface:
+
+**USB microphone (Linux)** — the built-in ALSA helper is the simplest path. Pass `"default"` or
+the specific ALSA device name to `kiosk_alsa_create()`:
+
+```c
+kiosk_alsa_config_t alsa_cfg = {
+    .capture_device  = "hw:1,0",   /* USB mic — check arecord -l */
+    .playback_device = "hw:0,0",   /* I²S speaker — check aplay -l */
+    .sample_rate     = 16000,
+};
+kiosk_audio_capture_fn  cap  = NULL;
+kiosk_audio_playback_fn play = NULL;
+void *alsa_ud = NULL;
+kiosk_alsa_create(&alsa_cfg, &cap, &play, &alsa_ud);
+```
+
+**I²S MEMS microphone** — supply a custom `capture_fn` that reads from your DMA ring buffer.
+The callback runs on the library's audio thread and must complete within `frame_ms` (default 20 ms):
+
+```c
+static int i2s_capture(int16_t *buf, size_t buf_len, int frames, void *userdata) {
+    /* Copy frames from DMA ring buffer into buf.
+     * Must not block, allocate memory, or call printf. */
+    return dma_ring_read(buf, frames); /* returns frames actually written */
+}
+```
+
+**I²S DAC (playback)** — supply a custom `playback_fn` that writes PCM to your DAC driver:
+
+```c
+static void i2s_playback(const int16_t *buf, int frames, void *userdata) {
+    dac_write(buf, frames); /* non-blocking write to I²S DMA buffer */
+}
+```
+
+Pass these callbacks in `kiosk_voice_config_t` instead of the ALSA helper. Full callback
+signatures and real-time constraints are documented in the
+[C library reference](/embedded/c-library).
+
 ---
 
 ## Microphone placement and acoustic treatment

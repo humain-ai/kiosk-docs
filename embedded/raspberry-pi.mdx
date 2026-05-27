@@ -15,15 +15,24 @@ For audio hardware recommendations — USB microphones, I²S HATs, and speaker a
 
 <Steps>
   <Step title="Install dependencies">
-    Update the package list and install libcurl, build tools, and ALSA:
+    Update the package list and install the core build tools and libcurl:
 
     ```bash
     sudo apt update && sudo apt install -y \
         build-essential \
         cmake \
         libcurl4-openssl-dev \
-        libasound2-dev \
         git
+    ```
+
+    For voice sessions, also install the WebRTC and audio dependencies:
+
+    ```bash
+    sudo apt install -y \
+        libdatachannel-dev \
+        libopus-dev \
+        libsrtp2-dev \
+        libasound2-dev
     ```
   </Step>
 
@@ -31,7 +40,23 @@ For audio hardware recommendations — USB microphones, I²S HATs, and speaker a
     ```bash
     git clone https://github.com/humain/kiosk-c.git
     cd kiosk-c
+    ```
+
+    Build with text sessions only (minimal, no voice dependencies required):
+
+    ```bash
     cmake -B build -DCMAKE_BUILD_TYPE=Release
+    cmake --build build --parallel
+    sudo cmake --install build
+    ```
+
+    Or build with voice and the built-in ALSA helper:
+
+    ```bash
+    cmake -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DKIOSK_WITH_VOICE=ON \
+        -DKIOSK_WITH_ALSA=ON
     cmake --build build --parallel
     sudo cmake --install build
     ```
@@ -205,4 +230,105 @@ For audio hardware recommendations — USB microphones, I²S HATs, and speaker a
   Call `open_with_retry()` both on startup and whenever `kiosk_session_message()` or
   `kiosk_session_stream()` returns `KIOSK_ERR_NETWORK`, `KIOSK_ERR_TIMEOUT`, or
   `KIOSK_ERR_SESSION_ENDED`.
+</Accordion>
+
+<Accordion title="Voice session quickstart">
+  Requires the library built with `-DKIOSK_WITH_VOICE=ON -DKIOSK_WITH_ALSA=ON` and the voice
+  dependencies installed (see step 1).
+
+  ```c
+  /* pi-voice.c — minimal WebRTC voice session on Raspberry Pi */
+  #include <stdio.h>
+  #include <stdlib.h>
+  #include <signal.h>
+  #include "kiosk.h"
+
+  static volatile int running = 1;
+
+  static void handle_signal(int sig) {
+      (void)sig;
+      running = 0;
+  }
+
+  static void on_event(kiosk_voice_event_t event, void *userdata) {
+      (void)userdata;
+      const char *labels[] = {
+          "connecting", "listening", "processing", "speaking", "ended"
+      };
+      printf("[%s]\n", labels[event]);
+      fflush(stdout);
+  }
+
+  int main(void) {
+      const char *credential = getenv("HUMAIN_CREDENTIAL");
+      if (!credential) {
+          fputs("HUMAIN_CREDENTIAL not set\n", stderr);
+          return 1;
+      }
+
+      signal(SIGINT,  handle_signal);
+      signal(SIGTERM, handle_signal);
+
+      kiosk_config_t cfg = { .credential = credential };
+      kiosk_client_t *client = kiosk_client_create(&cfg);
+      if (!client) { fputs("Failed to create client\n", stderr); return 1; }
+
+      /* Set up ALSA capture and playback using the built-in helper */
+      kiosk_audio_capture_fn  capture_fn  = NULL;
+      kiosk_audio_playback_fn playback_fn = NULL;
+      void *alsa_userdata = NULL;
+
+      kiosk_alsa_config_t alsa_cfg = {
+          .capture_device  = "default",
+          .playback_device = "default",
+          .sample_rate     = 16000,
+      };
+      kiosk_error_t err = kiosk_alsa_create(&alsa_cfg,
+                                             &capture_fn,
+                                             &playback_fn,
+                                             &alsa_userdata);
+      if (err != KIOSK_OK) {
+          fprintf(stderr, "ALSA init: %s\n", kiosk_error_string(err));
+          kiosk_client_destroy(client);
+          return 1;
+      }
+
+      kiosk_voice_config_t vcfg = {
+          .capture_fn  = capture_fn,
+          .playback_fn = playback_fn,
+          .event_fn    = on_event,
+          .userdata    = alsa_userdata,
+      };
+
+      kiosk_voice_session_t *vsession = NULL;
+      err = kiosk_voice_session_open(client, &vcfg, &vsession);
+      if (err != KIOSK_OK) {
+          fprintf(stderr, "Voice session open: %s\n", kiosk_error_string(err));
+          kiosk_alsa_destroy(alsa_userdata);
+          kiosk_client_destroy(client);
+          return 1;
+      }
+
+      err = kiosk_voice_session_start(vsession);
+      if (err != KIOSK_OK) {
+          fprintf(stderr, "Voice session start: %s\n", kiosk_error_string(err));
+      } else {
+          printf("Voice session active — speak into the microphone. Press Ctrl+C to stop.\n");
+          while (running) pause(); /* wait for signal */
+      }
+
+      kiosk_voice_session_stop(vsession); /* flushes audio and frees vsession */
+      kiosk_alsa_destroy(alsa_userdata);
+      kiosk_client_destroy(client);
+      return (err == KIOSK_OK) ? 0 : 1;
+  }
+  ```
+
+  Compile and run:
+
+  ```bash
+  export HUMAIN_CREDENTIAL=hk_live_your_credential_here
+  gcc pi-voice.c -lkiosk -lcurl -o pi-voice
+  ./pi-voice
+  ```
 </Accordion>

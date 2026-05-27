@@ -17,10 +17,38 @@ Source and prebuilt binaries: [github.com/humain/kiosk-c](https://github.com/hum
 ```bash
 git clone https://github.com/humain/kiosk-c.git
 cd kiosk-c
+
+# Text sessions only
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
+
+# Text + voice (WebRTC)
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+  -DKIOSK_WITH_VOICE=ON
+cmake --build build
+
+# Text + voice + built-in ALSA helper
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+  -DKIOSK_WITH_VOICE=ON \
+  -DKIOSK_WITH_ALSA=ON
+cmake --build build
+
 sudo cmake --install build
 ```
+
+<Accordion title="Dependencies">
+  ```text
+  Text sessions: libcurl >= 7.68.0, OpenSSL or mbedTLS
+
+  Voice sessions (-DKIOSK_WITH_VOICE=ON):
+    + libdatachannel >= 0.18
+    + libopus >= 1.3
+    + libsrtp2 >= 2.4 (transitive — installed by libdatachannel)
+
+  ALSA helper (-DKIOSK_WITH_ALSA=ON):
+    + libasound >= 1.2
+  ```
+</Accordion>
 
 Link your application against `libkiosk` and `libcurl`:
 
@@ -204,6 +232,186 @@ switch (err) {
 | `KIOSK_ERR_INTERNAL` | 11 | Unexpected server error (HTTP 500) | Exponential back-off; contact support if persistent |
 | `KIOSK_ERR_TIMEOUT` | 12 | Request or connection timed out | Retry immediately once, then back-off |
 | `KIOSK_ERR_OUT_OF_MEMORY` | 13 | Memory allocation failed | Increase heap or reduce buffer size |
+
+---
+
+## Voice sessions
+
+<Info>
+  Voice session functions are only available when built with `-DKIOSK_WITH_VOICE=ON`.
+  They are not available on FreeRTOS or Zephyr targets.
+</Info>
+
+## `kiosk_voice_config_t` fields
+
+<ParamField body="capture_fn" type="kiosk_audio_capture_fn" required>
+  Audio capture callback. Called from the library's internal audio thread at `frame_ms`
+  intervals. Fill the provided buffer with 16-bit signed PCM (16 kHz, mono) and return
+  the number of frames written.
+
+  **Must be real-time safe** — no heap allocation, no blocking mutex calls, no stdio.
+  Any violation causes audio glitches and WebRTC packet loss.
+</ParamField>
+
+<ParamField body="playback_fn" type="kiosk_audio_playback_fn" required>
+  Audio playback callback. Called with synthesised speech PCM received from the AI.
+  Write the provided samples to your speaker hardware.
+</ParamField>
+
+<ParamField body="vad_fn" type="kiosk_vad_fn" default="NULL">
+  Voice activity detection callback. Called with `speaking = 1` on speech onset and
+  `speaking = 0` on silence detection. Use for UI feedback — for example, showing a
+  "listening" indicator. Pass `NULL` to disable.
+</ParamField>
+
+<ParamField body="event_fn" type="kiosk_voice_event_fn" default="NULL">
+  Lifecycle event callback. Called on transitions between `KIOSK_VOICE_CONNECTING`,
+  `KIOSK_VOICE_LISTENING`, `KIOSK_VOICE_PROCESSING`, `KIOSK_VOICE_SPEAKING`, and
+  `KIOSK_VOICE_ENDED`. Pass `NULL` to disable.
+</ParamField>
+
+<ParamField body="userdata" type="void *" default="NULL">
+  Opaque pointer passed unchanged to all four callbacks.
+</ParamField>
+
+<ParamField body="sample_rate" type="int" default="16000">
+  Audio sample rate in Hz. Must match your audio hardware. Deepgram STT performs best
+  at 16 000 Hz or 48 000 Hz.
+</ParamField>
+
+<ParamField body="frame_ms" type="int" default="20">
+  Capture frame duration in milliseconds. Determines how often `capture_fn` is invoked.
+  20 ms is the standard WebRTC frame size.
+</ParamField>
+
+### ALSA example
+
+Complete voice session using the built-in ALSA helper (`-DKIOSK_WITH_ALSA=ON`):
+
+```c
+#include <signal.h>
+#include <stdio.h>
+#include "kiosk.h"
+
+static volatile int running = 1;
+static void on_sigint(int s) { (void)s; running = 0; }
+
+static void on_event(kiosk_voice_event_t ev, void *ud) {
+    (void)ud;
+    const char *names[] = {
+        "connecting", "listening", "processing", "speaking", "ended"
+    };
+    printf("[voice] %s\n", names[ev]);
+}
+
+int main(void) {
+    signal(SIGINT, on_sigint);
+
+    kiosk_config_t cfg = {
+        .credential = "hk_live_your_credential_here",
+        .timeout_ms = 30000,
+    };
+    kiosk_client_t *client = kiosk_client_create(&cfg);
+    if (!client) { fprintf(stderr, "out of memory\n"); return 1; }
+
+    /* Set up ALSA capture and playback */
+    kiosk_alsa_config_t alsa_cfg = {
+        .capture_device  = "hw:1,0",
+        .playback_device = "default",
+        .sample_rate     = 16000,
+    };
+    kiosk_audio_capture_fn  cap_fn;
+    kiosk_audio_playback_fn play_fn;
+    void                   *alsa_ctx = NULL;
+    kiosk_error_t err = kiosk_alsa_create(&alsa_cfg, &cap_fn, &play_fn, &alsa_ctx);
+    if (err != KIOSK_OK) {
+        fprintf(stderr, "ALSA init failed: %s\n", kiosk_error_string(err));
+        kiosk_client_destroy(client);
+        return 1;
+    }
+
+    /* Open and start voice session */
+    kiosk_voice_config_t vcfg = {
+        .capture_fn  = cap_fn,
+        .playback_fn = play_fn,
+        .event_fn    = on_event,
+        .userdata    = alsa_ctx,
+    };
+    kiosk_voice_session_t *session = NULL;
+    err = kiosk_voice_session_open(client, &vcfg, &session);
+    if (err != KIOSK_OK) {
+        fprintf(stderr, "voice session failed: %s\n", kiosk_error_string(err));
+        goto cleanup;
+    }
+    kiosk_voice_session_start(session);
+    printf("Voice session active. Press Ctrl+C to stop.\n");
+    while (running) pause();
+    kiosk_voice_session_stop(session);
+
+cleanup:
+    kiosk_alsa_destroy(alsa_ctx);
+    kiosk_client_destroy(client);
+    return err == KIOSK_OK ? 0 : 1;
+}
+```
+
+### Custom audio hardware
+
+For teams not using ALSA — implement `capture_fn` and `playback_fn` directly for your
+platform's audio driver:
+
+```c
+static int my_capture(int16_t *buf, size_t buf_len, int frames, void *ud) {
+    (void)ud;
+    /*
+     * Read `frames` frames from your audio hardware into `buf`.
+     * Must return within frame_ms (default 20 ms) — runs on a real-time thread.
+     * No malloc, no mutex, no I/O other than audio.
+     *
+     * Example: read from a custom I2S driver
+     */
+    return my_i2s_read(buf, frames);   /* platform-specific */
+}
+
+static void my_playback(const int16_t *buf, int frames, void *ud) {
+    (void)ud;
+    /* Write `frames` frames to your speaker hardware */
+    my_i2s_write(buf, frames);         /* platform-specific */
+}
+
+kiosk_voice_config_t vcfg = {
+    .capture_fn  = my_capture,
+    .playback_fn = my_playback,
+    .userdata    = NULL,
+};
+```
+
+<Accordion title="Audio thread requirements">
+  The capture callback runs on an internal real-time audio thread. It must complete
+  within `frame_ms` (default 20 ms). Violations cause audio glitches and WebRTC packet
+  loss.
+
+  **Requirements:**
+  - No dynamic memory allocation (`malloc`, `free`, `new`)
+  - No blocking mutex calls
+  - No stdio (`printf`, `fwrite`)
+
+  **For I2S hardware:** use DMA-backed ring buffers. Copy from the DMA ring buffer into
+  the library's provided `buf` — the copy should take under 1 ms.
+
+  **For USB audio:** use ALSA's `snd_pcm_readi` with a pre-allocated buffer. Set the
+  capture thread to `SCHED_FIFO` priority to avoid scheduler jitter.
+</Accordion>
+
+<Accordion title="ICE and NAT traversal">
+  The library uses STUN to discover the device's public address. The default STUN server
+  is Google's public STUN (`stun.l.google.com:19302`).
+
+  No TURN server is required in most network configurations — the Humain Kiosk platform
+  handles the server-side connectivity. If the device is behind a symmetric NAT, contact
+  [support@humain.ai](mailto:support@humain.ai) to enable TURN relay credentials for
+  your workspace.
+</Accordion>
 
 ---
 

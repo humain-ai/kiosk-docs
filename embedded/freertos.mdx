@@ -5,9 +5,17 @@ icon: "stack-front"
 ---
 
 <Warning>
-  **Voice sessions are not supported on FreeRTOS.** The WebRTC audio pipeline requires a
-  POSIX threading model and ALSA/PulseAudio. FreeRTOS targets support **text sessions and
-  streaming only** — use the Raspberry Pi or embedded Linux guide if you need voice.
+  **Voice sessions are not available on FreeRTOS in v1.** The WebRTC voice pipeline
+  (DTLS, SRTP, Opus) requires roughly 512 KB RAM and a POSIX threading model — more than
+  most microcontrollers provide. FreeRTOS targets support **text sessions and streaming
+  only**.
+
+  For voice on constrained hardware, the recommended architecture is a **companion Linux
+  module** (Raspberry Pi, i.MX8, or similar) connected over UART or SPI. The Linux module
+  runs `kiosk-c` with `-DKIOSK_WITH_VOICE=ON` and handles the WebRTC session; the
+  FreeRTOS MCU handles local I/O, sensors, and display. See the
+  [audio hardware guide](/embedded/audio-hardware) for companion module wiring and the
+  [Raspberry Pi guide](/embedded/raspberry-pi) for the Linux-side setup.
 </Warning>
 
 The `kiosk-c` library targets C99 and uses libcurl for HTTP/HTTPS. On FreeRTOS you need a

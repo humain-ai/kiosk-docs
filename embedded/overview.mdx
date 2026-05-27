@@ -21,14 +21,16 @@ receives responses — the device itself needs no LLM, STT, or TTS capability.
 | C standard | C99 |
 | libcurl | 7.68.0 |
 | TLS | OpenSSL 1.1+ or mbedTLS 2.16+ |
-| RAM (text sessions) | 64 KB available heap |
-| RAM (voice sessions) | 512 KB available heap + audio buffers |
-| Flash / storage | ~180 KB for the static library |
+| Session mode | Text (REST + WebSocket) · Voice via WebRTC (Linux targets) |
+| ROM | ~40 KB (text only) · ~240 KB with voice |
+| RAM | ~8 KB per text session · ~512 KB for WebRTC voice session |
 | Network | TCP/IP with DNS, HTTPS (port 443) |
 
 <Note>
-  Voice sessions require audio capture hardware and ALSA or PulseAudio on Linux. FreeRTOS and
-  Zephyr targets support **text and streaming only** — see the platform guides for details.
+  Voice sessions require `-DKIOSK_WITH_VOICE=ON` at build time and a Linux target.
+  FreeRTOS and Zephyr support text sessions only in v1. For voice on constrained
+  hardware, see the [audio hardware guide](/embedded/audio-hardware) for recommended
+  companion module architectures.
 </Note>
 
 ---

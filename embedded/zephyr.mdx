@@ -5,9 +5,16 @@ icon: "bolt"
 ---
 
 <Warning>
-  **Voice sessions are not supported on Zephyr.** The WebRTC audio pipeline requires a full
-  POSIX thread model and ALSA. Zephyr targets support **text sessions and streaming only**.
-  For voice, use the [Raspberry Pi guide](/embedded/raspberry-pi) instead.
+  **Voice sessions are not available on Zephyr in v1.** The WebRTC voice pipeline
+  (DTLS, SRTP, Opus) requires roughly 512 KB RAM and a POSIX threading model — more than
+  most Zephyr targets provide. Zephyr targets support **text sessions and streaming only**.
+
+  For voice on constrained hardware, the recommended architecture is a **companion Linux
+  module** (Raspberry Pi, i.MX8, or similar) connected over UART or SPI. The Linux module
+  runs `kiosk-c` with `-DKIOSK_WITH_VOICE=ON` and handles the WebRTC session; the Zephyr
+  MCU handles local I/O, sensors, and display. See the
+  [audio hardware guide](/embedded/audio-hardware) for companion module wiring and the
+  [Raspberry Pi guide](/embedded/raspberry-pi) for the Linux-side setup.
 </Warning>
 
 The `kiosk-c` library is distributed as a Zephyr module. Add it to your `west.yml` manifest and
