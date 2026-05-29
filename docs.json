@@ -149,6 +149,18 @@
       {
         "tab": "API reference",
         "openapi": "openapi.yaml"
+      },
+      {
+        "tab": "Changelog",
+        "groups": [
+          {
+            "group": "Changelog",
+            "pages": [
+              "changelog/overview",
+              "changelog/2026-05-29"
+            ]
+          }
+        ]
       }
     ]
   },
