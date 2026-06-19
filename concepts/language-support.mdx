@@ -1,0 +1,251 @@
+---
+title: "Language support"
+description: "Send a preferred language with every session and display the EU AI Act disclosure text."
+icon: "language"
+---
+
+## Overview
+
+When a kiosk is configured with multiple language personas, you can tell the server which language to use for a session by passing a BCP-47 language code. The server responds with:
+
+- **`detected_language`** — the BCP-47 code the session will actually use (may differ from your request if the code is not configured on the kiosk).
+- **`disclosure_text`** — an EU AI Act disclosure string. Display this to the end user before or at the start of the conversation.
+
+Both fields are optional from the server's side: if the kiosk has only one language, `detected_language` will reflect that language regardless of what you send, and `disclosure_text` will be empty if no disclosure is configured.
+
+---
+
+## Session open contract
+
+**POST** `/v1/sessions`
+
+```json
+{
+  "mode": "text",
+  "preferred_language": "tr"
+}
+```
+
+`preferred_language` is optional — omit it entirely to let the server apply its default.
+
+**Response (201)**:
+
+```json
+{
+  "session_id": "sess_…",
+  "detected_language": "tr",
+  "disclosure_text": "This conversation is handled by an AI assistant."
+}
+```
+
+---
+
+## JavaScript / TypeScript SDK
+
+```typescript
+import { HumainKioskClient } from '@humain/kiosk-js'
+
+const client = new HumainKioskClient({ credential: process.env.HUMAIN_CREDENTIAL! })
+
+const session = await client.openSession({ preferredLanguage: 'tr' })
+
+// Display the disclosure text before showing the chat UI
+if (session.disclosureText) {
+  showDisclosureBanner(session.disclosureText)
+}
+```
+
+### Widget — automatic language selector
+
+```html
+<script src="https://cdn.humain.ai/widget/v1/widget.js"></script>
+<script>
+HumainWidget.init({
+  credential: 'hk_live_…',
+  languageSelector: {
+    enabled: true,
+    languages: [
+      { code: 'en', label: 'English' },
+      { code: 'tr', label: 'Türkçe'  },
+      { code: 'ar', label: 'العربية' },
+      { code: 'de', label: 'Deutsch' },
+    ],
+  },
+  showDisclosure: true,   // default: true
+})
+</script>
+```
+
+When `languageSelector.enabled` is `true`, the widget shows language buttons before the first message is sent. The chosen language is passed to `openSession` automatically and the disclosure banner (if any) is shown immediately after the session opens.
+
+### React
+
+```tsx
+import { KioskChat } from '@humain/kiosk-js/react'
+
+export function SupportChat() {
+  return (
+    <KioskChat
+      credential={process.env.NEXT_PUBLIC_HUMAIN_CREDENTIAL!}
+      showLanguageSelector={{
+        languages: [
+          { code: 'en', label: 'English' },
+          { code: 'tr', label: 'Türkçe'  },
+        ],
+      }}
+      showDisclosure={true}
+    />
+  )
+}
+```
+
+### Vue
+
+```vue
+<template>
+  <KioskChat
+    :credential="credential"
+    :show-language-selector="{ languages }"
+    :show-disclosure="true"
+  />
+</template>
+
+<script setup lang="ts">
+import { KioskChat } from '@humain/kiosk-js/vue'
+
+const credential = import.meta.env.VITE_HUMAIN_CREDENTIAL
+const languages  = [
+  { code: 'en', label: 'English' },
+  { code: 'tr', label: 'Türkçe'  },
+]
+</script>
+```
+
+---
+
+## Python SDK
+
+```python
+from humain_kiosk import HumainKioskClient
+
+client = HumainKioskClient(credential=os.environ["HUMAIN_CREDENTIAL"])
+
+session = client.open_session(preferred_language="tr")
+
+if session.disclosure_text:
+    print(session.disclosure_text)
+
+with client.session(preferred_language="ar") as s:
+    print(s.send("مرحباً"))
+```
+
+---
+
+## Go SDK
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    kiosk "github.com/humain/kiosk-go"
+)
+
+func main() {
+    client, _ := kiosk.NewClient(os.Getenv("HUMAIN_CREDENTIAL"))
+
+    session, err := client.OpenSession(context.Background(), kiosk.SessionOptions{
+        PreferredLanguage: "tr",
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer session.Close(context.Background())
+
+    if session.DisclosureText != "" {
+        fmt.Println(session.DisclosureText)
+    }
+}
+```
+
+---
+
+## .NET SDK
+
+```csharp
+using Humain.Kiosk;
+
+var client = new KioskClient(new KioskClientOptions
+{
+    Credential = Environment.GetEnvironmentVariable("HUMAIN_CREDENTIAL")!,
+});
+
+await using var session = await client.OpenSessionAsync(
+    mode: SessionMode.Text,
+    preferredLanguage: "tr"
+);
+
+if (!string.IsNullOrEmpty(session.DisclosureText))
+{
+    Console.WriteLine(session.DisclosureText);
+}
+```
+
+---
+
+## C SDK
+
+```c
+#include <kiosk.h>
+#include <stdio.h>
+
+kiosk_client_t *client = kiosk_client_create(&(kiosk_config_t){
+    .credential = getenv("HUMAIN_KIOSK_CREDENTIAL"),
+});
+
+kiosk_session_config_t cfg = {0};
+cfg.mode               = KIOSK_SESSION_TEXT;
+cfg.preferred_language = "tr";
+
+kiosk_session_t             *session = NULL;
+kiosk_session_open_result_t  result  = {0};
+
+kiosk_session_open(client, &cfg, &session, &result);
+
+if (result.disclosure_text[0]) {
+    puts(result.disclosure_text);
+}
+```
+
+Pass `NULL` for `config` to use all defaults (text mode, no language preference).
+Pass `NULL` for the result parameter if you do not need the detected language or disclosure text.
+
+---
+
+## WordPress plugin
+
+In the admin panel, go to **Settings → Humain Kiosk → Language** and choose one of:
+
+| Mode | Behaviour |
+|---|---|
+| **Auto-detect** | Uses the visitor's `navigator.language` (browser default) |
+| **Fixed language** | Always sends the BCP-47 code you enter |
+| **Language selector** | Shows language buttons before the first message |
+
+The **AI disclosure** checkbox controls whether the disclosure banner is shown to visitors. The text itself is configured in your kiosk settings on the Humain admin panel.
+
+---
+
+## Behaviour reference
+
+| Scenario | Result |
+|---|---|
+| `preferred_language` omitted | Server uses the kiosk's default language |
+| Code sent but not configured on kiosk | Server falls back to default; `detected_language` reflects the fallback |
+| Code matches a configured persona | Session uses that persona; `detected_language` echoes the code |
+| `disclosure_text` empty | No disclosure is configured on the kiosk; omit the banner |
+
+<Note>
+The `preferred_language` field has no effect on kiosks with a single language. The server always returns the language the session will use in `detected_language`.
+</Note>
