@@ -40,8 +40,8 @@ life of that session. You cannot change mode mid-session — open a new session 
     ## Voice mode
 
     Real-time audio over WebRTC. The AI speaks and listens using Opus-encoded audio frames. The
-    server runs speech-to-text (Deepgram), LLM inference, and text-to-speech (ElevenLabs) in a
-    single streaming pipeline.
+    server uses **Gemini Live** — a single bidirectional audio-in/audio-out connection that handles
+    speech recognition, inference, and synthesis natively in one pipeline.
 
     **Available endpoints:**
     - `POST /v1/sessions/{sid}/webrtc/offer` — exchange SDP offer/answer.

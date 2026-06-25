@@ -47,6 +47,7 @@
               "concepts/authentication",
               "concepts/session-lifecycle",
               "concepts/modes",
+              "concepts/language-support",
               "concepts/sandbox-mode",
               "concepts/error-codes",
               "concepts/rate-limits"

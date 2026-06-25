@@ -237,6 +237,54 @@ The **AI disclosure** checkbox controls whether the disclosure banner is shown t
 
 ---
 
+---
+
+## Admin panel — configuring language personas
+
+Each language a kiosk should speak in requires a **language persona** configured in the admin panel:
+
+1. Open **Kiosk → Personas** and click **Add persona**.
+2. Set the **Language** field to a BCP-47 code (e.g. `tr`, `ar`, `de`).
+3. Write the system prompt in that language, or use the same prompt as the default persona —
+   the model reads the language from the session and responds accordingly.
+4. Optionally configure a **disclosure text** specific to that language.
+5. Save. The persona is active immediately for new sessions.
+
+One persona is designated as the **default language**. If a client sends a `preferred_language`
+code that does not match any configured persona, the server uses the default and returns that
+code in `detected_language`.
+
+<Tip>
+  With Gemini Live, you do not need to configure per-language STT or TTS voices. The model
+  handles all 90+ supported languages natively from a single persona configuration.
+</Tip>
+
+---
+
+## Mid-session language mismatch
+
+Once a session is open, the language is fixed for its lifetime. To switch languages, close the
+current session and open a new one with the updated `preferred_language`.
+
+If a user switches their input language mid-session (e.g. starts in Turkish, then types in
+English), the AI will follow their input language in its response — the session's configured
+language persona provides the persona and tone, but the model mirrors the user's input language.
+This behaviour is automatic with Gemini Live and requires no server-side configuration.
+
+---
+
+## Gemini Live and language support
+
+Voice sessions run on **Gemini Live**, which natively supports 90+ languages from a single
+model. No per-language STT model or TTS voice configuration is needed — setting
+`preferred_language` on the session open request is all that's required.
+
+For text sessions, the LLM also handles multilingual input without per-language configuration.
+The language persona sets the persona identity; the model adapts its language to the session's
+`preferred_language` setting.
+
+---
+
 ## Behaviour reference
 
 | Scenario | Result |
@@ -245,6 +293,7 @@ The **AI disclosure** checkbox controls whether the disclosure banner is shown t
 | Code sent but not configured on kiosk | Server falls back to default; `detected_language` reflects the fallback |
 | Code matches a configured persona | Session uses that persona; `detected_language` echoes the code |
 | `disclosure_text` empty | No disclosure is configured on the kiosk; omit the banner |
+| User switches input language mid-session | AI mirrors the user's input language; persona stays the same |
 
 <Note>
 The `preferred_language` field has no effect on kiosks with a single language. The server always returns the language the session will use in `detected_language`.

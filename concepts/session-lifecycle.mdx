@@ -33,8 +33,21 @@ ends, call `POST /v1/sessions/{sid}/end` to close it cleanly.
 
     ```json
     // Response: 201 Created
-    { "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6" }
+    {
+      "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "detected_language": "tr",
+      "disclosure_text": "This conversation is handled by an AI assistant."
+    }
     ```
+
+    `detected_language` reflects the BCP-47 code the session will actually use — useful when
+    the requested language is not configured on the kiosk and the server falls back to its
+    default. `disclosure_text` is the EU AI Act disclosure string for this kiosk; display it
+    to the end user before or at the start of the conversation. Both fields are absent when
+    not applicable (single-language kiosk, no disclosure configured).
+
+    See [Language support](/concepts/language-support) for how to send `preferred_language`
+    and how to render the disclosure banner.
   </Step>
   <Step title="Interact">
     While the session is open, the device sends messages (text mode), streams real-time audio

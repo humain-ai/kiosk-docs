@@ -56,6 +56,11 @@ paths:
                 summary: Open a voice session
                 value:
                   mode: voice
+              textWithLanguage:
+                summary: Open a text session with language preference
+                value:
+                  mode: text
+                  preferred_language: "tr"
       responses:
         "201":
           description: Session created
@@ -65,6 +70,8 @@ paths:
                 $ref: "#/components/schemas/OpenSessionResponse"
               example:
                 session_id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                detected_language: "tr"
+                disclosure_text: "This conversation is handled by an AI assistant."
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "402":
@@ -270,6 +277,22 @@ components:
             - `text` — REST + WebSocket messaging
             - `voice` — WebRTC real-time audio
             - `voip` — SIP telephony bridge
+        preferred_language:
+          type: string
+          description: |
+            BCP-47 language code for this session (e.g. `"tr"`, `"ar"`, `"de"`).
+            The server uses the matching language persona if one is configured on the kiosk.
+            Falls back to the kiosk's default language if no match is found.
+            Omit to use the kiosk's default.
+          example: "tr"
+        conversation_initiation_data:
+          type: object
+          description: Optional structured data attached to the session at open time.
+          properties:
+            variables:
+              type: object
+              additionalProperties: true
+              description: Key-value pairs injected into the persona prompt as template variables.
 
     OpenSessionResponse:
       type: object
@@ -278,6 +301,20 @@ components:
           type: string
           format: uuid
           description: Unique session identifier — pass this to all subsequent calls.
+        detected_language:
+          type: string
+          description: |
+            BCP-47 code of the language the session will use. May differ from
+            `preferred_language` if the requested language is not configured on the kiosk;
+            in that case the server falls back to the kiosk's default language.
+          example: "tr"
+        disclosure_text:
+          type: string
+          description: |
+            EU AI Act disclosure string configured for this kiosk. Display this to the end
+            user before or at the start of the conversation. Empty string when no disclosure
+            is configured.
+          example: "This conversation is handled by an AI assistant."
 
     MessageRequest:
       type: object

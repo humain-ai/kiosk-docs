@@ -5,15 +5,39 @@ description: "Full-duplex audio with sub-200 ms latency, server-side VAD, and ba
 
 ## Architecture
 
-The voice pipeline runs entirely server-side. Your device streams Opus-encoded audio frames; the
-server handles STT (Deepgram), LLM inference, and TTS synthesis (ElevenLabs) in a single
+The voice pipeline runs entirely server-side. Your device streams Opus-encoded audio frames over a
+single WebRTC connection; the server processes speech, inference, and synthesis in a unified
 streaming loop. You never need to call a transcription or TTS API yourself.
 
 **Key characteristics:**
 - **Codec** — Opus, 48 kHz, mono
 - **VAD** — server-side, 600 ms silence threshold
 - **Barge-in** — the user can interrupt mid-response; the AI stops immediately
-- **Latency** — typically 150–250 ms from end of speech to first audio frame back
+- **Latency** — typically 80–150 ms from end of speech to first audio frame back
+
+### Gemini Live architecture
+
+Voice sessions use **Gemini Live** — a single bidirectional WebSocket between the Humain server
+and Google's Gemini model that carries compressed audio in both directions. This replaces the
+previous STT → LLM → TTS chain with a single model that handles all three stages natively.
+
+```
+Old pipeline:    Audio → Deepgram STT → Gemini text → ElevenLabs TTS → Audio
+Gemini Live:     Audio → Gemini Live (audio-in / audio-out) → Audio
+```
+
+| Metric | STT + LLM + TTS chain | Gemini Live |
+|---|---|---|
+| End-to-speech latency (typical) | 600–900 ms | 80–150 ms |
+| Language support | STT languages only | 90+ languages natively |
+| Pipeline hops | 3 (STT, LLM, TTS) | 1 (Gemini Live) |
+| Per-language configuration | Separate STT/TTS voices per language | Single model, language-aware |
+
+<Note>
+  Gemini Live supports 90+ languages natively — you do not need to configure separate
+  STT or TTS voices per language. Set `preferred_language` on the session open request and
+  the model speaks that language automatically. See [Language support](/concepts/language-support).
+</Note>
 
 ## Connection sequence
 
