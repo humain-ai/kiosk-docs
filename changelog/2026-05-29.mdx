@@ -1,0 +1,59 @@
+---
+title: "Week of May 29, 2026"
+description: "Embedded platform support — Raspberry Pi voice, FreeRTOS and Zephyr text/streaming, and an audio hardware selection guide."
+---
+
+## New features
+
+<Update label="New" tags={["Embedded"]}>
+  **Voice sessions on Raspberry Pi.** You can now run full WebRTC voice
+  sessions on Raspberry Pi (arm64, Raspberry Pi OS Bookworm or later) with
+  auto-reconnect on network failure under systemd. This makes Raspberry Pi a
+  viable production target for voice-enabled kiosks and a recommended
+  companion module for voice on MCU-based deployments.
+
+  See the [Raspberry Pi guide](/embedded/raspberry-pi).
+</Update>
+
+<Update label="New" tags={["Embedded"]}>
+  **FreeRTOS support (text and streaming).** The `kiosk-c` library now
+  integrates with FreeRTOS applications using lwIP or FreeRTOS-Plus-TCP. Text
+  sessions and streaming are supported on constrained MCUs; voice is not
+  available in v1 and should run on a companion Linux module.
+
+  See the [FreeRTOS guide](/embedded/freertos).
+</Update>
+
+<Update label="New" tags={["Embedded"]}>
+  **Zephyr RTOS support (text and streaming).** Distributed as a Zephyr
+  module — add it to `west.yml` and configure via Kconfig. Targets Zephyr 3.5+
+  with networking and TLS credentials enabled. As with FreeRTOS, voice
+  requires a companion Linux module in v1.
+
+  See the [Zephyr guide](/embedded/zephyr).
+</Update>
+
+<Update label="New" tags={["Hardware"]}>
+  **Audio hardware selection guide.** A new reference for choosing
+  microphones and speakers for embedded kiosks, including USB, I²S, MEMS PDM,
+  and analogue options, with SNR targets and STT accuracy notes for noisy
+  environments.
+
+  See the [Audio hardware guide](/embedded/audio-hardware).
+</Update>
+
+## Updates
+
+<Update label="Improved" tags={["Embedded"]}>
+  **Local voice session testing.** Added end-to-end examples for testing
+  voice sessions locally on embedded targets, making it easier to validate
+  audio capture and playback before deploying to production hardware.
+</Update>
+
+<Update label="Improved" tags={["Embedded"]}>
+  **Companion Linux module pattern.** Clarified the recommended architecture
+  for voice on resource-constrained MCUs — pair a Linux module (Raspberry Pi,
+  i.MX8, or similar) running the WebRTC pipeline with the MCU handling local
+  I/O over UART or SPI. Wiring guidance is included in the
+  [audio hardware guide](/embedded/audio-hardware).
+</Update>
