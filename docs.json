@@ -64,6 +64,13 @@
             ]
           },
           {
+            "group": "Guides",
+            "pages": [
+              "guides/dynamic-variables",
+              "guides/webhooks"
+            ]
+          },
+          {
             "group": "Try it out",
             "pages": [
               "playground/text",

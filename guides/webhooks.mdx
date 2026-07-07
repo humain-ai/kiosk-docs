@@ -1,0 +1,310 @@
+---
+title: "Webhooks"
+description: "Receive real-time notifications when sessions open and close, guardrails fire, and other kiosk events happen — with HMAC signature verification."
+icon: "webhook"
+---
+
+## Overview
+
+Webhooks push event notifications to your backend as they happen, so you don't have to poll the
+API for session or guardrail activity. Each delivery is a signed HTTP POST to an endpoint URL you
+configure in the admin panel.
+
+### Event types
+
+| Event | Fired when |
+|---|---|
+| `session.opened` | A new session is created |
+| `session.ended` | A session closes (completed, timed out, errored, or abandoned) |
+| `guardrail.fired` | A guardrail rule blocks, modifies, or warns on input or output |
+| `fraud.blocked` | FraudGuard blocks a credential due to suspicious activity |
+| `credential.revoked` | A device credential is revoked from the admin panel |
+| `kiosk.updated` | A kiosk's configuration (persona, guardrails, variables) is changed |
+| `document.processed` | An uploaded knowledge document finishes indexing |
+| `escalation.created` | A conversation is escalated to a human agent |
+
+Every delivery shares a common envelope:
+
+```json
+{
+  "id": "evt_3fa85f64571445",
+  "type": "session.ended",
+  "workspace_id": "ws_a1b2c3",
+  "created_at": "2026-06-12T14:30:00Z",
+  "data": { }
+}
+```
+
+`id` is a unique delivery UUID — use it to deduplicate retried deliveries (see
+[Retry policy](#retry-policy-and-idempotency) below). `data` holds the event-specific payload:
+
+<AccordionGroup>
+  <Accordion title="session.opened">
+    ```json
+    {
+      "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "kiosk_id": "kiosk_9f2a",
+      "mode": "text",
+      "language": "tr",
+      "credential_prefix": "hk_live_a1b2"
+    }
+    ```
+  </Accordion>
+  <Accordion title="session.ended">
+    ```json
+    {
+      "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "kiosk_id": "kiosk_9f2a",
+      "duration_s": 142,
+      "turns": 6,
+      "end_reason": "completed"
+    }
+    ```
+    `end_reason` is one of `completed`, `timeout`, `error`, `abandoned`.
+  </Accordion>
+  <Accordion title="guardrail.fired">
+    ```json
+    {
+      "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "rule_type": "blocked_phrase",
+      "rule_id": "rule_44f1",
+      "action": "blocked"
+    }
+    ```
+    `action` is one of `blocked`, `modified`, `warned`.
+  </Accordion>
+  <Accordion title="fraud.blocked">
+    ```json
+    {
+      "credential_prefix": "hk_live_a1b2",
+      "reason": "Excessive rate-limit violations",
+      "blocked_until": "2026-06-12T15:30:00Z"
+    }
+    ```
+  </Accordion>
+  <Accordion title="credential.revoked">
+    ```json
+    {
+      "credential_prefix": "hk_live_a1b2",
+      "kiosk_id": "kiosk_9f2a",
+      "revoked_by": "user_5c1d"
+    }
+    ```
+  </Accordion>
+  <Accordion title="kiosk.updated">
+    ```json
+    {
+      "kiosk_id": "kiosk_9f2a",
+      "changed_fields": ["persona.prompt", "guardrails.blocked_phrases"],
+      "updated_by": "user_5c1d"
+    }
+    ```
+  </Accordion>
+  <Accordion title="document.processed">
+    ```json
+    {
+      "document_id": "doc_77ae",
+      "kiosk_id": "kiosk_9f2a",
+      "status": "indexed",
+      "chunk_count": 214
+    }
+    ```
+    `status` is `indexed` or `failed`.
+  </Accordion>
+  <Accordion title="escalation.created">
+    ```json
+    {
+      "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "kiosk_id": "kiosk_9f2a",
+      "reason": "explicit_request",
+      "escalated_to": "queue_support"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Setting up an endpoint
+
+1. Open **Workspace settings → Webhooks** in the admin panel.
+2. Click **Add endpoint** and enter the HTTPS URL your backend exposes.
+3. Select which event types to receive — you don't have to subscribe to all eight.
+4. Save. The panel shows a **signing secret** once — store it immediately. It's used to verify
+   incoming deliveries (see below).
+
+<Warning>
+  The signing secret is shown only once at creation time. If you lose it, regenerate a new one
+  from the endpoint's settings — this invalidates the old secret immediately.
+</Warning>
+
+---
+
+## Signature verification
+
+Every delivery is signed with HMAC-SHA256 so you can verify it genuinely came from Humain and
+was not tampered with in transit. **Verifying the signature is mandatory** — never process a
+webhook payload before verifying it.
+
+**Signing scheme:**
+
+```
+signature = HMAC-SHA256(secret, "{timestamp}.{raw_body}")
+```
+
+Two headers carry the signature and timestamp:
+
+| Header | Value |
+|---|---|
+| `X-Humain-Signature-256` | `sha256=<hex-encoded HMAC>` |
+| `X-Humain-Timestamp` | Unix timestamp (seconds) when the request was signed |
+
+Reject the request if the timestamp is more than 300 seconds from the current time — this
+prevents replay attacks with a captured payload.
+
+Each SDK ships a verification helper so you don't write the HMAC comparison yourself.
+
+### JavaScript / TypeScript
+
+```typescript
+import { verifyWebhookSignature, WebhookVerificationError } from '@humain/kiosk-js'
+import express from 'express'
+
+const app = express()
+
+app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  try {
+    verifyWebhookSignature(
+      req.headers['x-humain-signature-256'] as string,
+      req.headers['x-humain-timestamp'] as string,
+      req.body, // raw Buffer — do not parse JSON before verifying
+      process.env.WEBHOOK_SECRET!,
+    )
+  } catch (err) {
+    if (err instanceof WebhookVerificationError) {
+      return res.status(401).send('invalid signature')
+    }
+    throw err
+  }
+
+  const event = JSON.parse(req.body)
+  // ... handle event
+  res.status(200).end()
+})
+```
+
+### Python
+
+```python
+from fastapi import FastAPI, Request, HTTPException
+from humain_kiosk import verify_webhook_signature, WebhookVerificationError
+import os
+
+app = FastAPI()
+
+@app.post("/webhook")
+async def handle_webhook(request: Request):
+    body = await request.body()
+    try:
+        verify_webhook_signature(
+            request.headers["x-humain-signature-256"],
+            request.headers["x-humain-timestamp"],
+            body,
+            os.environ["WEBHOOK_SECRET"],
+        )
+    except WebhookVerificationError:
+        raise HTTPException(status_code=401, detail="invalid signature")
+
+    event = await request.json()
+    # ... handle event
+```
+
+### Go
+
+```go
+func handleWebhook(w http.ResponseWriter, r *http.Request) {
+    body, _ := io.ReadAll(r.Body)
+
+    err := kiosk.VerifyWebhookSignature(
+        r.Header.Get("X-Humain-Signature-256"),
+        r.Header.Get("X-Humain-Timestamp"),
+        body,
+        os.Getenv("WEBHOOK_SECRET"),
+        300,
+    )
+    if err != nil {
+        http.Error(w, "invalid signature", http.StatusUnauthorized)
+        return
+    }
+
+    var event kiosk.WebhookEvent[json.RawMessage]
+    json.Unmarshal(body, &event)
+    // ... handle event
+}
+```
+
+### .NET
+
+```csharp
+app.MapPost("/webhook", async (HttpContext ctx) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var rawBody = await reader.ReadToEndAsync();
+
+    try
+    {
+        WebhookVerifier.VerifySignature(
+            ctx.Request.Headers["X-Humain-Signature-256"]!,
+            ctx.Request.Headers["X-Humain-Timestamp"]!,
+            System.Text.Encoding.UTF8.GetBytes(rawBody),
+            Environment.GetEnvironmentVariable("WEBHOOK_SECRET")!
+        );
+    }
+    catch (WebhookVerificationException)
+    {
+        return Results.Unauthorized();
+    }
+
+    // ... handle event
+    return Results.Ok();
+});
+```
+
+<Note>
+  Webhooks are a server-side feature — there is no C library helper. Devices don't receive
+  webhook deliveries; only backends with a publicly reachable HTTPS endpoint do.
+</Note>
+
+---
+
+## Retry policy and idempotency
+
+If your endpoint doesn't respond with a `2xx` status within 10 seconds, the delivery is retried
+with exponential back-off: immediately, then after 1 minute, 15 minutes, 1 hour, and 6 hours —
+five attempts total over roughly 7 hours. After the final attempt fails, the delivery is marked
+failed and visible in the endpoint's delivery log.
+
+An endpoint that fails **20 consecutive deliveries** is automatically disabled. You'll need to
+re-enable it from the admin panel after fixing the underlying issue.
+
+Because retries resend the same event, **your handler must be idempotent**. Use the envelope's
+`id` field to deduplicate:
+
+```python
+if redis.exists(f"webhook:{event['id']}"):
+    return  # already processed
+redis.set(f"webhook:{event['id']}", "1", ex=86400)
+# ... process event
+```
+
+---
+
+## Testing your endpoint
+
+Each webhook endpoint has a **Send test event** button in the admin panel. It sends a
+`session.opened` payload with placeholder data, signed with the endpoint's real secret, so you
+can verify your signature verification and handler logic end-to-end without needing a live
+session.
+
+The delivery log on the endpoint's detail page shows the request sent, the response your server
+returned, and the latency — useful for debugging both test and production deliveries.

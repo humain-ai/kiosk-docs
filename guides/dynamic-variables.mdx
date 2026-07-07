@@ -1,0 +1,183 @@
+---
+title: "Dynamic variables"
+description: "Inject per-session values — customer names, booking references, order numbers — into a kiosk's persona prompt at session open."
+icon: "variable"
+---
+
+## Overview
+
+Dynamic variables let you personalize a conversation before it starts. Instead of writing a
+generic persona prompt, you define placeholders in the admin panel and fill them in per session —
+for example, greeting a customer by name or giving the AI a booking reference to look up.
+
+Variables are injected once, at session open, via `conversation_initiation_data.variables`. They
+are available to the persona prompt for the lifetime of the session.
+
+**When to use dynamic variables:**
+- Greeting a logged-in user by name.
+- Passing a booking, order, or ticket reference the AI should reference or look up.
+- Carrying context from an upstream system (a CRM, a booking engine) into the conversation
+  without the user having to repeat it.
+
+---
+
+## Configuring variable definitions
+
+Variables must be declared on the kiosk before they can be injected:
+
+1. Open **Kiosk → Persona → Variables** in the admin panel.
+2. Click **Add variable** and give it a name — this is the key the session open call must match
+   (e.g. `customer_name`, `booking_ref`).
+3. Reference it in the persona prompt using `{{variable_name}}` syntax:
+
+   ```text
+   You are a support assistant for {{customer_name}}. Their booking reference is {{booking_ref}}.
+   ```
+
+4. Mark the variable **secret** if its value should never appear in transcripts, webhook
+   payloads, or logs (see [Secret variables](#secret-variables) below).
+5. Save. The variable is available to `conversation_initiation_data.variables` immediately.
+
+<Warning>
+  Keys sent in `conversation_initiation_data.variables` that do not match a declared variable
+  are ignored — they are not injected into the prompt and do not cause an error.
+</Warning>
+
+---
+
+## Session open contract
+
+**POST** `/v1/sessions`
+
+```json
+{
+  "mode": "text",
+  "conversation_initiation_data": {
+    "variables": {
+      "customer_name": "Alice",
+      "booking_ref": "TK-9021"
+    }
+  }
+}
+```
+
+Omit `conversation_initiation_data` entirely if the session has no variables to inject.
+
+---
+
+## JavaScript / TypeScript SDK
+
+```typescript
+import { HumainKioskClient } from '@humain/kiosk-js'
+
+const client = new HumainKioskClient({ credential: process.env.HUMAIN_CREDENTIAL! })
+
+const session = await client.openSession({
+  variables: { customer_name: 'Alice', booking_ref: 'TK-9021' },
+})
+```
+
+If `variables` is omitted or empty, the client does not send `conversation_initiation_data` at all.
+
+---
+
+## Python SDK
+
+```python
+from humain_kiosk import HumainKioskClient
+
+client = HumainKioskClient(credential=os.environ["HUMAIN_CREDENTIAL"])
+
+session = client.open_session(
+    variables={"customer_name": "Alice", "booking_ref": "TK-9021"},
+)
+```
+
+---
+
+## Go SDK
+
+```go
+session, err := client.OpenSession(context.Background(), kiosk.SessionOptions{
+    Variables: map[string]string{
+        "customer_name": "Alice",
+        "booking_ref":   "TK-9021",
+    },
+})
+```
+
+---
+
+## .NET SDK
+
+```csharp
+await using var session = await client.OpenSessionAsync(
+    variables: new Dictionary<string, string>
+    {
+        ["customer_name"] = "Alice",
+        ["booking_ref"]   = "TK-9021",
+    }
+);
+```
+
+---
+
+## C SDK
+
+The C library takes variables as two parallel, `NULL`-terminated arrays rather than a map:
+
+```c
+const char *keys[]   = { "customer_name", "booking_ref", NULL };
+const char *values[] = { "Alice",         "TK-9021",     NULL };
+
+kiosk_session_config_t cfg = {0};
+cfg.mode           = KIOSK_SESSION_TEXT;
+cfg.variable_keys   = keys;
+cfg.variable_values = values;
+
+kiosk_session_t *session = NULL;
+kiosk_session_open(client, &cfg, &session, NULL);
+```
+
+The HTTP layer serializes `variable_keys` / `variable_values` into
+`conversation_initiation_data.variables` before sending. Leave both arrays as `NULL` (the
+default in a zero-initialized struct) if the session has no variables.
+
+---
+
+## Secret variables
+
+A variable marked **secret** in the admin panel is injected into the persona prompt exactly like
+any other variable, but the server treats its value as sensitive everywhere else:
+
+- **Not logged** — secret values are redacted (`[REDACTED]`) from server-side request logs.
+- **Not in webhook payloads** — `session.opened` webhook events include variable *names* but
+  omit the values of any variable marked secret.
+- **Not in transcripts** — if you export conversation history, secret variable values are
+  redacted even if the AI echoed them back in a response.
+
+Use secret variables for anything you would not want to appear in a support ticket or an audit
+export — an internal account ID, a one-time verification code, an API key used by an action tool.
+
+<Note>
+  Marking a variable secret does not prevent the model itself from referencing the value in its
+  response to the end user — it only controls what Humain stores and forwards. If the persona
+  prompt tells the model to read a value aloud, the model will still do so.
+</Note>
+
+---
+
+## Testing with the persona preview
+
+The admin panel's **Persona → Preview** tool lets you test a prompt with sample variable values
+before deploying:
+
+1. Open **Kiosk → Persona → Preview**.
+2. Enter sample values for each declared variable.
+3. Send test messages — the preview uses the same prompt-building pipeline as production sessions,
+   so what you see is what a real session would produce.
+4. Secret variables show a **masked** input field in the preview, matching production redaction
+   behaviour.
+
+This is the fastest way to verify variable substitution and phrasing before wiring up the
+session open call from your integration.

@@ -26,6 +26,14 @@ tags:
     description: Open, interact with, and close conversation sessions.
   - name: Voice (WebRTC)
     description: Establish real-time voice sessions over WebRTC.
+  - name: Webhooks
+    description: |
+      Manage webhook endpoints and inspect delivery history. Part of the Admin API —
+      authenticated with the admin session cookie, not a device credential.
+  - name: Analytics
+    description: |
+      Query session and usage analytics for a workspace. Part of the Admin API —
+      authenticated with the admin session cookie, not a device credential.
 
 paths:
   /v1/sessions:
@@ -61,6 +69,14 @@ paths:
                 value:
                   mode: text
                   preferred_language: "tr"
+              textWithVariables:
+                summary: Open a text session with dynamic variables
+                value:
+                  mode: text
+                  conversation_initiation_data:
+                    variables:
+                      customer_name: "Alice"
+                      booking_ref: "TK-9021"
       responses:
         "201":
           description: Session created
@@ -240,6 +256,250 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/v1/webhooks:
+    get:
+      operationId: listWebhookEndpoints
+      tags: [Webhooks]
+      summary: List webhook endpoints
+      security:
+        - AdminSession: []
+      responses:
+        "200":
+          description: Webhook endpoints for the workspace
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WebhookEndpoint"
+        "401":
+          $ref: "#/components/responses/AdminUnauthenticated"
+    post:
+      operationId: createWebhookEndpoint
+      tags: [Webhooks]
+      summary: Create a webhook endpoint
+      description: |
+        Creates a new webhook endpoint. The response includes the signing secret — it is
+        shown only once and cannot be retrieved again. Regenerate it from
+        `POST /api/v1/webhooks/{webhook_id}/regenerate-secret` if lost.
+      security:
+        - AdminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWebhookRequest"
+            example:
+              url: "https://example.com/webhooks/humain"
+              event_types: [session.opened, session.ended, guardrail.fired]
+              enabled: true
+      responses:
+        "201":
+          description: Webhook endpoint created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpointWithSecret"
+        "400":
+          description: Invalid URL or event type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/AdminUnauthenticated"
+
+  /api/v1/webhooks/{webhook_id}:
+    parameters:
+      - $ref: "#/components/parameters/WebhookId"
+    get:
+      operationId: getWebhookEndpoint
+      tags: [Webhooks]
+      summary: Get a webhook endpoint
+      security:
+        - AdminSession: []
+      responses:
+        "200":
+          description: Webhook endpoint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
+        "401":
+          $ref: "#/components/responses/AdminUnauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateWebhookEndpoint
+      tags: [Webhooks]
+      summary: Update a webhook endpoint
+      security:
+        - AdminSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWebhookRequest"
+      responses:
+        "200":
+          description: Webhook endpoint updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
+        "401":
+          $ref: "#/components/responses/AdminUnauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteWebhookEndpoint
+      tags: [Webhooks]
+      summary: Delete a webhook endpoint
+      security:
+        - AdminSession: []
+      responses:
+        "204":
+          description: Webhook endpoint deleted — no body returned
+        "401":
+          $ref: "#/components/responses/AdminUnauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/webhooks/{webhook_id}/test:
+    post:
+      operationId: sendTestWebhookEvent
+      tags: [Webhooks]
+      summary: Send a test event
+      description: |
+        Sends a `session.opened` payload with placeholder data to the endpoint, signed with
+        its real secret. Equivalent to the **Send test event** button in the admin panel.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      security:
+        - AdminSession: []
+      responses:
+        "202":
+          description: Test event queued for delivery
+        "401":
+          $ref: "#/components/responses/AdminUnauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/webhooks/{webhook_id}/deliveries:
+    get:
+      operationId: listWebhookDeliveries
+      tags: [Webhooks]
+      summary: List recent deliveries
+      description: |
+        Returns the most recent delivery attempts for the endpoint, including retries,
+        for debugging failed or delayed webhooks.
+      parameters:
+        - $ref: "#/components/parameters/WebhookId"
+      security:
+        - AdminSession: []
+      responses:
+        "200":
+          description: Recent delivery attempts, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WebhookDelivery"
+        "401":
+          $ref: "#/components/responses/AdminUnauthenticated"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/analytics/sessions:
+    get:
+      operationId: querySessionAnalytics
+      tags: [Analytics]
+      summary: Query session analytics
+      description: |
+        Returns session counts, average duration, and completion rate bucketed by day or
+        hour over the requested date range.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: Start of the date range (inclusive), ISO 8601 date.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          description: End of the date range (inclusive), ISO 8601 date.
+          schema:
+            type: string
+            format: date
+        - name: kiosk_id
+          in: query
+          required: false
+          description: Filter to a single kiosk. Omit to aggregate across the workspace.
+          schema:
+            type: string
+        - name: granularity
+          in: query
+          required: false
+          description: Bucket size for the returned series.
+          schema:
+            type: string
+            enum: [hour, day]
+            default: day
+      security:
+        - AdminSession: []
+      responses:
+        "200":
+          description: Session analytics series
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionAnalyticsResponse"
+        "401":
+          $ref: "#/components/responses/AdminUnauthenticated"
+
+  /api/v1/analytics/usage:
+    get:
+      operationId: queryUsageAnalytics
+      tags: [Analytics]
+      summary: Query usage analytics
+      description: |
+        Returns LLM token, STT minute, and TTS character consumption bucketed by day over
+        the requested date range — useful for cost tracking and plan limit monitoring.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: kiosk_id
+          in: query
+          required: false
+          schema:
+            type: string
+      security:
+        - AdminSession: []
+      responses:
+        "200":
+          description: Usage analytics series
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageAnalyticsResponse"
+        "401":
+          $ref: "#/components/responses/AdminUnauthenticated"
+
 components:
   securitySchemes:
     DeviceToken:
@@ -253,6 +513,15 @@ components:
         Format: `hk_live_` followed by 43 base64url characters (32 random bytes).
         The raw token is shown only once at creation time and is never stored in plain text.
 
+    AdminSession:
+      type: apiKey
+      in: cookie
+      name: __session
+      description: |
+        Admin panel session cookie (HttpOnly), issued when a workspace admin signs in.
+        Webhook and analytics endpoints are part of the Admin API surface and are not
+        accessible with a device credential.
+
   parameters:
     SessionId:
       name: sid
@@ -263,6 +532,15 @@ components:
         type: string
         format: uuid
         example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+    WebhookId:
+      name: webhook_id
+      in: path
+      required: true
+      description: Webhook endpoint identifier returned by `POST /api/v1/webhooks`
+      schema:
+        type: string
+        example: "wh_9f2a1c"
 
   schemas:
     OpenSessionRequest:
@@ -291,8 +569,15 @@ components:
           properties:
             variables:
               type: object
-              additionalProperties: true
-              description: Key-value pairs injected into the persona prompt as template variables.
+              additionalProperties:
+                type: string
+              description: |
+                Key-value pairs injected into the persona prompt as template variables.
+                Keys must match a variable declared on the kiosk (**Kiosk → Persona → Variables**)
+                or they are silently ignored. See [Dynamic variables](/guides/dynamic-variables).
+              example:
+                customer_name: "Alice"
+                booking_ref: "TK-9021"
 
     OpenSessionResponse:
       type: object
@@ -367,6 +652,157 @@ components:
         sdp_mline_index:
           type: integer
           description: Index of the media description (`candidate.sdpMLineIndex`).
+
+    WebhookEventType:
+      type: string
+      enum:
+        - session.opened
+        - session.ended
+        - guardrail.fired
+        - fraud.blocked
+        - credential.revoked
+        - kiosk.updated
+        - document.processed
+        - escalation.created
+      description: See [Webhooks — event types](/guides/webhooks#event-types) for payload schemas.
+
+    WebhookEndpoint:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "wh_9f2a1c"
+        url:
+          type: string
+          format: uri
+          example: "https://example.com/webhooks/humain"
+        event_types:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookEventType"
+        enabled:
+          type: boolean
+        secret_prefix:
+          type: string
+          description: First 8 characters of the signing secret, for identification only.
+          example: "whsec_a1"
+        created_at:
+          type: string
+          format: date-time
+
+    WebhookEndpointWithSecret:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEndpoint"
+        - type: object
+          properties:
+            secret:
+              type: string
+              description: |
+                Full HMAC signing secret. Shown only in the response to
+                `POST /api/v1/webhooks` — store it immediately, it cannot be retrieved again.
+              example: "whsec_a1b2c3d4e5f6..."
+
+    CreateWebhookRequest:
+      type: object
+      required: [url, event_types]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: HTTPS URL to receive webhook deliveries.
+        event_types:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookEventType"
+          minItems: 1
+        enabled:
+          type: boolean
+          default: true
+
+    UpdateWebhookRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        event_types:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookEventType"
+        enabled:
+          type: boolean
+
+    WebhookDelivery:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Delivery UUID — matches the `id` field in the delivered event envelope.
+          example: "evt_3fa85f64571445"
+        event_type:
+          $ref: "#/components/schemas/WebhookEventType"
+        status:
+          type: string
+          enum: [delivered, failed, pending]
+        response_code:
+          type: integer
+          nullable: true
+          description: HTTP status code returned by the endpoint, if a response was received.
+        attempt_count:
+          type: integer
+        attempted_at:
+          type: string
+          format: date-time
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    SessionAnalyticsBucket:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date-time
+        session_count:
+          type: integer
+        avg_duration_s:
+          type: number
+        completion_rate:
+          type: number
+          description: "Fraction of sessions that ended with `end_reason: completed`."
+
+    SessionAnalyticsResponse:
+      type: object
+      properties:
+        granularity:
+          type: string
+          enum: [hour, day]
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionAnalyticsBucket"
+
+    UsageAnalyticsBucket:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        llm_tokens:
+          type: integer
+        stt_minutes:
+          type: number
+        tts_characters:
+          type: integer
+
+    UsageAnalyticsResponse:
+      type: object
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageAnalyticsBucket"
 
     Error:
       type: object
@@ -507,4 +943,26 @@ components:
           example:
             error: INTERNAL_ERROR
             message: An unexpected error occurred.
+            details: {}
+
+    AdminUnauthenticated:
+      description: Missing or invalid admin session.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: UNAUTHENTICATED
+            message: Missing or invalid admin session.
+            details: {}
+
+    NotFound:
+      description: The requested resource does not exist in this workspace.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: NOT_FOUND
+            message: The requested resource was not found.
             details: {}
