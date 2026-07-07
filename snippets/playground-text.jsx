@@ -5,7 +5,7 @@ const ENVS = {
   live: 'https://api.humain.ai',
 };
 
-function Label({ children }) {
+export function Label({ children }) {
   return (
     <label style={{
       display: 'block',
@@ -21,7 +21,7 @@ function Label({ children }) {
   );
 }
 
-function Panel({ title, children, mono = false }) {
+export function Panel({ title, children, mono = false }) {
   return (
     <div style={{
       border: '1px solid var(--border, #e5e7eb)',
@@ -61,7 +61,7 @@ function Panel({ title, children, mono = false }) {
   );
 }
 
-function Message({ role, text }) {
+export function Message({ role, text }) {
   const isUser = role === 'user';
   return (
     <div style={{

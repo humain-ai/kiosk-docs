@@ -15,7 +15,7 @@ const STATUSES = {
   error:       { label: 'Error',       dot: '',           color: '#ef4444' },
 };
 
-function Label({ children }) {
+export function Label({ children }) {
   return (
     <label style={{
       display: 'block',
@@ -31,7 +31,7 @@ function Label({ children }) {
   );
 }
 
-function StatusBar({ status, sessionId }) {
+export function StatusBar({ status, sessionId }) {
   const s = STATUSES[status] ?? STATUSES.idle;
   return (
     <div className="hk-status" style={{ marginBottom: 16 }}>
