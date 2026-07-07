@@ -1,6 +1,6 @@
 const { useState, useRef, useCallback } = React;
 
-const ENVS = {
+export const ENVS = {
   sandbox: 'https://sandbox.api.humain.ai',
   live: 'https://api.humain.ai',
 };

@@ -1,11 +1,11 @@
 const { useState, useRef, useCallback, useEffect } = React;
 
-const ENVS = {
+export const ENVS = {
   sandbox: 'https://sandbox.api.humain.ai',
   live: 'https://api.humain.ai',
 };
 
-const STATUSES = {
+export const STATUSES = {
   idle:        { label: 'Idle',        dot: '',           color: '#9ca3af' },
   connecting:  { label: 'Connecting…', dot: 'connecting', color: '#f59e0b' },
   connected:   { label: 'Connected',   dot: 'listening',  color: '#10b981' },
