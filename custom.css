@@ -1,22 +1,60 @@
+/* ─── Kiosk playground design tokens ──────────────────────────────────────────
+   Matches kiosk-demo's fixed dark "voice kiosk" look (near-black + violet accent
+   + frosted glass + monospace labels) — the playground widgets intentionally
+   stay dark regardless of the docs site's light/dark theme, since they preview
+   the actual kiosk terminal experience. ─────────────────────────────────────── */
+
+.hk-kiosk-panel {
+  --hk-kiosk-bg: #060010;
+  --hk-kiosk-card: rgba(0, 0, 0, 0.3);
+  --hk-kiosk-border: rgba(255, 255, 255, 0.08);
+  --hk-kiosk-border-soft: rgba(255, 255, 255, 0.05);
+  --hk-kiosk-accent: #9333ea;
+  --hk-kiosk-accent-hover: #a855f7;
+  --hk-kiosk-accent-soft: rgba(147, 51, 234, 0.2);
+  --hk-kiosk-text: #f4f4f5;
+  --hk-kiosk-text-dim: #a1a1aa;
+  --hk-kiosk-text-muted: #71717a;
+  --hk-kiosk-text-faint: #52525b;
+  --hk-kiosk-input-bg: rgba(24, 24, 27, 0.8);
+  --hk-kiosk-radius: 10px;
+  --hk-kiosk-mono: ui-monospace, Consolas, "SFMono-Regular", monospace;
+  position: relative;
+  overflow: hidden;
+  /* Fallback color shown before the WebGL canvas paints its first frame, and
+     if WebGL is unavailable in the visitor's browser. */
+  background: var(--hk-kiosk-bg);
+  border-radius: 14px;
+  color: var(--hk-kiosk-text);
+  font-family: var(--hk-kiosk-mono);
+}
+
+.hk-kiosk-glass {
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+}
+
 /* ─── Voice button ─────────────────────────────────────────────────────────── */
 
 .hk-voice-btn {
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: var(--primary, #0E50BD);
-  border: none;
+  background: #18181b;
+  border: 2px solid #3f3f46;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s ease, transform 0.15s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
   position: relative;
   flex-shrink: 0;
+  color: #52525b;
 }
 
 .hk-voice-btn:hover:not(:disabled) {
-  background: var(--primary-dark, #0a3d8f);
+  border-color: #52525b;
   transform: scale(1.05);
 }
 
@@ -31,105 +69,66 @@
 
 .hk-voice-btn.listening,
 .hk-voice-btn.active {
+  background: rgba(147, 51, 234, 0.2);
+  border-color: rgba(147, 51, 234, 0.5);
+  color: #c084fc;
   animation: hk-pulse 1.8s ease-in-out infinite;
 }
 
 @keyframes hk-pulse {
-  0%   { box-shadow: 0 0 0 0   rgba(14, 80, 189, 0.45); }
-  60%  { box-shadow: 0 0 0 22px rgba(14, 80, 189, 0);    }
-  100% { box-shadow: 0 0 0 0   rgba(14, 80, 189, 0);    }
+  0%   { box-shadow: 0 0 0 0   rgba(147, 51, 234, 0.45); }
+  60%  { box-shadow: 0 0 0 22px rgba(147, 51, 234, 0);    }
+  100% { box-shadow: 0 0 0 0   rgba(147, 51, 234, 0);    }
 }
 
-/* ─── Status indicator ─────────────────────────────────────────────────────── */
+/* ─── Status badge (pill, matches kiosk-demo StatusBadge) ────────────────────── */
 
 .hk-status {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 500;
+  gap: 6px;
+  font-family: var(--hk-kiosk-mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #3f3f46;
+  color: #e4e4e7;
+}
+
+.hk-status.active {
+  background: #9333ea;
+  color: #ffffff;
+}
+
+.hk-status.error {
+  background: rgba(127, 29, 29, 0.6);
+  color: #f87171;
 }
 
 .hk-status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #d1d5db;
+  background: currentColor;
   flex-shrink: 0;
-  transition: background 0.2s;
 }
 
-.hk-status-dot.connecting {
-  background: #f59e0b;
-  animation: hk-blink 1s step-end infinite;
+.hk-status-dot.pulse {
+  position: relative;
 }
 
-.hk-status-dot.listening {
-  background: #10b981;
+.hk-status-dot.pulse::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.75;
+  animation: hk-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
-.hk-status-dot.speaking {
-  background: #6366f1;
-  animation: hk-blink 0.8s step-start infinite;
-}
-
-@keyframes hk-blink {
-  50% { opacity: 0; }
-}
-
-/* ─── Mode / environment toggle ────────────────────────────────────────────── */
-
-.hk-mode-toggle {
-  display: inline-flex;
-  background: #f3f4f6;
-  border-radius: 8px;
-  padding: 3px;
-  gap: 2px;
-}
-
-.dark .hk-mode-toggle {
-  background: #27272a;
-}
-
-.hk-mode-toggle button {
-  padding: 6px 14px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  color: #6b7280;
-  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.dark .hk-mode-toggle button {
-  color: #a1a1aa;
-}
-
-.hk-mode-toggle button:hover:not(:disabled) {
-  color: #111827;
-}
-
-.dark .hk-mode-toggle button:hover:not(:disabled) {
-  color: #fafafa;
-}
-
-.hk-mode-toggle button.active {
-  background: var(--primary, #0E50BD);
-  color: #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
-}
-
-.dark .hk-mode-toggle button.active {
-  background: var(--primary, #0E50BD);
-  color: #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-
-.hk-mode-toggle button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+@keyframes hk-ping {
+  75%, 100% { transform: scale(2.4); opacity: 0; }
 }
