@@ -1,6 +1,6 @@
 ---
 title: "Session modes"
-description: "Choose the right interaction mode for your channel: text for REST and streaming, voice for real-time WebRTC audio, voip for telephony."
+description: "Choose the right interaction mode for your channel: text for WebSocket messaging, voice for real-time WebRTC audio, voip for telephony."
 ---
 
 The `mode` field in `POST /v1/sessions` determines which interaction patterns are available for the
@@ -13,18 +13,19 @@ life of that session. You cannot change mode mid-session — open a new session 
     The default mode. Suitable for chat interfaces, kiosk touchscreens, and any channel where you
     exchange typed messages.
 
-    **Available endpoints:**
-    - `POST /v1/sessions/{sid}/message` — synchronous: send input, wait for complete response.
-    - `GET /v1/sessions/{sid}/stream` — WebSocket: send input, receive tokens as they are generated.
+    **Available endpoint:**
+    - `GET {agent_url}/v1/sessions/{sid}/ws` — WebSocket: send input, receive the AI's response.
+      This is the only way to exchange conversation turns in text mode — there is no REST
+      message endpoint. See [WebSocket streaming](/connections/websocket-streaming).
 
     **When to use:**
     - Chat widgets embedded in websites or apps.
     - Kiosk touchscreens where users type or tap.
-    - Server-to-server integrations where streaming latency is not critical.
+    - Server-to-server integrations.
     - Any context where audio is unavailable or undesirable.
 
     ```bash
-    # Open a text session
+    # Open a text session — returns session_id and agent_url
     curl -X POST https://api.humain.ai/v1/sessions \
       -H "Authorization: Bearer hk_live_your_credential_here" \
       -H "Content-Type: application/json" \
@@ -32,8 +33,9 @@ life of that session. You cannot change mode mid-session — open a new session 
     ```
 
     <Note>
-      For the lowest perceived latency in a chat UI, use WebSocket streaming mode so tokens
-      appear as they are generated rather than waiting for the full response.
+      Browsers must first call `POST /v1/sessions/{sid}/ws-ticket` and pass the result as
+      `?ticket=` on the WS upgrade — browsers cannot set an `Authorization` header on a
+      WebSocket handshake. Non-browser clients send the Bearer token directly.
     </Note>
   </Tab>
   <Tab title="voice">
@@ -43,9 +45,9 @@ life of that session. You cannot change mode mid-session — open a new session 
     server uses **Gemini Live** — a single bidirectional audio-in/audio-out connection that handles
     speech recognition, inference, and synthesis natively in one pipeline.
 
-    **Available endpoints:**
-    - `POST /v1/sessions/{sid}/webrtc/offer` — exchange SDP offer/answer.
-    - `POST /v1/sessions/{sid}/webrtc/ice` — submit ICE candidates.
+    **Available endpoints** (on `agent_url`, returned by `POST /v1/sessions`):
+    - `POST {agent_url}/v1/sessions/{sid}/webrtc/offer` — exchange SDP offer/answer.
+    - `POST {agent_url}/v1/sessions/{sid}/webrtc/ice` — submit ICE candidates.
 
     **Voice pipeline behaviour:**
     - **Server-side VAD** — silence is detected server-side after 600 ms. You do not need to
@@ -109,8 +111,7 @@ life of that session. You cannot change mode mid-session — open a new session 
 
 | Feature | text | voice | voip |
 |---|---|---|---|
-| REST messaging | ✅ | — | — |
-| WebSocket streaming | ✅ | — | — |
+| WebSocket messaging | ✅ | — | — |
 | WebRTC audio | — | ✅ | — |
 | SIP / PSTN | — | — | ✅ |
 | Server-side VAD | — | ✅ | ✅ |

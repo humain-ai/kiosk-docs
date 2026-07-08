@@ -140,6 +140,16 @@
             ]
           },
           {
+            "group": "Telegram",
+            "pages": [
+              "telegram/overview",
+              "telegram/bot",
+              "telegram/mini-app",
+              "telegram/business",
+              "telegram/payments"
+            ]
+          },
+          {
             "group": "Embedded",
             "pages": [
               "embedded/overview",
@@ -165,6 +175,7 @@
             "group": "Changelog",
             "pages": [
               "changelog/overview",
+              "changelog/2026-07-08",
               "changelog/2026-05-29"
             ]
           }

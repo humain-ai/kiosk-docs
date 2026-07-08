@@ -31,7 +31,6 @@ import { createKioskStore, KioskChat, KioskVoice } from "@humain/kiosk-js/svelte
 
   const kiosk = createKioskStore({
     credential: "hk_live_your_credential_here",
-    mode: "sandbox",
   })
 
   let messages: Array<{ role: string; content: string }> = []
@@ -94,7 +93,6 @@ import { createKioskStore, KioskChat, KioskVoice } from "@humain/kiosk-js/svelte
 
 <KioskChat
   credential="hk_live_your_credential_here"
-  mode="sandbox"
   placeholder="Ask me anything…"
   on:message={(e) => console.log("User:", e.detail)}
   on:response={(e) => console.log("AI:", e.detail)}
@@ -110,7 +108,6 @@ import { createKioskStore, KioskChat, KioskVoice } from "@humain/kiosk-js/svelte
 
 <KioskVoice
   credential="hk_live_your_credential_here"
-  mode="sandbox"
   on:transcript={(e) => console.log("Heard:", e.detail)}
   on:response={(e) => console.log("AI:", e.detail)}
 />

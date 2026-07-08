@@ -19,7 +19,14 @@ users.
 
 ## Rate limit response
 
-When either limit is hit the API returns:
+<Note>
+  This HTTP error shape applies to `POST /v1/sessions` and other REST calls. If the sustained
+  limit is hit mid-conversation, the WebSocket instead sends
+  `{"type":"error","code":"TURN_ERROR","message":"RATE_LIMITED: ..."}` — see
+  [WebSocket streaming](/connections/websocket-streaming#error-frames).
+</Note>
+
+When either limit is hit over HTTP, the API returns:
 
 ```http
 HTTP/1.1 429 Too Many Requests

@@ -24,8 +24,7 @@ stream responses with one import and a handful of method calls — no raw HTTP r
     import { HumainKioskClient } from "@humain/kiosk-js"
 
     const kiosk = new HumainKioskClient({
-      credential: "hk_live_your_credential_here",
-      mode: "sandbox", // switch to "live" for production
+      credential: "hk_test_your_credential_here", // hk_test_ = sandbox, hk_live_ = production
     })
 
     const session = await kiosk.openSession()
@@ -38,8 +37,7 @@ stream responses with one import and a handful of method calls — no raw HTTP r
     import { HumainKioskClient } from "@humain/kiosk-js"
 
     const kiosk = new HumainKioskClient({
-      credential: "hk_live_your_credential_here",
-      mode: "sandbox",
+      credential: "hk_test_your_credential_here", // hk_test_ = sandbox, hk_live_ = production
     })
 
     const session = await kiosk.openSession()
@@ -48,6 +46,9 @@ stream responses with one import and a handful of method calls — no raw HTTP r
     await session.close()
     ```
     </CodeGroup>
+
+    There is no separate sandbox URL or client mode — sandbox behavior comes entirely from
+    using an `hk_test_` credential. See [Sandbox mode](/concepts/sandbox-mode).
   </Step>
 
   <Step title="Add streaming">
@@ -77,6 +78,13 @@ stream responses with one import and a handful of method calls — no raw HTTP r
     | `tool_call` | `name`, `callId` | An action endpoint was invoked |
     | `tool_result` | `callId`, `status` | Action endpoint returned |
     | `turn_end` | `messageCount: number` | Generation complete |
+
+    <Note>
+      The underlying WebSocket delivers one complete response per turn — see
+      [WebSocket streaming](/connections/websocket-streaming) for the wire protocol. `chunk`,
+      `tool_call`, and `tool_result` events are a client-side reveal built by the SDK on top of
+      that single response, not genuine incremental delivery from the network.
+    </Note>
   </Step>
 
   <Step title="Handle errors">

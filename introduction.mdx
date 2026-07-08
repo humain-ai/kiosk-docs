@@ -9,9 +9,10 @@ terminals, VoIP adapters, website widgets — authenticate with per-device API t
 All intelligence runs server-side. Devices are thin clients.
 
 <Tip>
-  Use **sandbox mode** (`https://sandbox.api.humain.ai`) during development. Responses are
-  deterministic, no AI credits are consumed, and billing events are not generated. Switch to
-  the production URL when you are ready to go live.
+  Use an **`hk_test_…` sandbox credential** during development — there is no separate sandbox
+  URL, sandbox behavior comes from the credential itself. No AI credits are consumed and no
+  billing events are generated. Switch to an `hk_live_…` credential when you are ready to go
+  live. See [Sandbox mode](/concepts/sandbox-mode).
 </Tip>
 
 ## What you can build
@@ -26,8 +27,8 @@ All intelligence runs server-side. Devices are thin clients.
     needed. Plug in via SIP or a VoIP adapter.
   </Card>
   <Card title="Website widget" icon="browser" href="/web/quickstart">
-    Embed a chat widget on any page. Stream responses token-by-token for a fast, modern feel
-    without managing LLM infrastructure.
+    Embed a chat widget on any page. A persistent WebSocket keeps the conversation fast and
+    responsive without managing LLM infrastructure.
   </Card>
   <Card title="Drive-through" icon="car" href="/connections/webrtc-voice">
     Real-time voice ordering with sub-200 ms latency over WebRTC. Supports barge-in so
@@ -49,6 +50,10 @@ All intelligence runs server-side. Devices are thin clients.
     Native iOS and Android SDKs with full WebRTC voice support, AVAudioSession management,
     and SwiftUI / Compose integration. See also: [Android guide](/mobile/android-kotlin).
   </Card>
+  <Card title="Telegram" icon="brand-telegram" href="/telegram/overview">
+    A bot for managing kiosks and answering group chats, a Mini App for full workspace
+    management, and Business connections that auto-reply to your own Telegram DMs.
+  </Card>
 </Columns>
 
 ## Quick start
@@ -64,9 +69,10 @@ All intelligence runs server-side. Devices are thin clients.
     `Authorization: Bearer` header.
   </Step>
   <Step title="Open a session">
-    Call `POST /v1/sessions` with `{"mode":"text"}` to start a conversation. Then call
-    `POST /v1/sessions/{id}/message` for each user turn, and `POST /v1/sessions/{id}/end` when
-    done. See [Try it out](/playground/text) for a live interactive demo.
+    Call `POST /v1/sessions` with `{"mode":"text"}` — the response includes a `session_id` and
+    an `agent_url`. Open a WebSocket to `{agent_url}/v1/sessions/{id}/ws` and exchange
+    conversation turns there, then call `POST {agent_url}/v1/sessions/{id}/end` when done. See
+    [Try it out](/playground/text) for a live interactive demo.
   </Step>
 </Steps>
 

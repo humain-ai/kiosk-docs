@@ -46,18 +46,19 @@ etc.) calls the Humain API to open and close sessions. The audio bridge is handl
 sequenceDiagram
   participant P as PSTN / Caller
   participant T as Telephony layer (PBX / Twilio)
-  participant A as Humain API
+  participant S as Humain API (server)
+  participant AG as Humain API (agent_url)
 
   P->>T: Incoming call
-  T->>A: POST /v1/sessions {"mode":"voip"}
-  A-->>T: 201 {"session_id":"..."}
-  Note over T,A: SIP INVITE → SIP 200 OK
-  P->>A: Audio (via RTP / SIP)
-  A->>P: Audio (TTS response)
-  Note over P,A: Conversation continues...
+  T->>S: POST /v1/sessions {"mode":"voip"}
+  S-->>T: 201 {"session_id":"...","agent_url":"..."}
+  Note over T,AG: SIP INVITE → SIP 200 OK
+  P->>AG: Audio (via RTP / SIP)
+  AG->>P: Audio (Gemini Live response)
+  Note over P,AG: Conversation continues...
   P->>T: Caller hangs up
-  T->>A: POST /v1/sessions/{sid}/end
-  A-->>T: 204
+  T->>AG: POST /v1/sessions/{sid}/end
+  AG-->>T: 204
 ```
 
 ## Configuration checklist
@@ -83,7 +84,9 @@ sequenceDiagram
     ```
   </Step>
   <Step title="Close sessions on hang-up">
-    When the caller hangs up, call `POST /v1/sessions/{sid}/end` to flush usage data.
+    When the caller hangs up, call `POST {agent_url}/v1/sessions/{sid}/end` (the `agent_url`
+    from the open response, not necessarily the host you called to open the session) to flush
+    usage data.
   </Step>
 </Steps>
 
@@ -99,7 +102,8 @@ sequenceDiagram
 
 <Note>
   For best transcription accuracy, prefer G.722 (wideband) or Opus over G.711 narrowband.
-  Deepgram's STT performs significantly better at 16 kHz+ audio.
+  Gemini Live — the model that handles live voice, including VoIP calls — performs
+  significantly better at 16 kHz+ audio.
 </Note>
 
 ## Security

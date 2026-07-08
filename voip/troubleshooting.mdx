@@ -78,12 +78,12 @@ credential step.
     **Quick wins (in order of impact):**
 
     1. **Switch to G.722** — If you are using G.711 (8 kHz), upgrade to G.722 (16 kHz). The
-       wider audio bandwidth significantly improves Deepgram's word-error rate, especially for
-       accented speech and proper nouns. See the [codec guide](/voip/codec-guide) for
-       configuration examples.
+       wider audio bandwidth significantly improves Gemini Live's transcription accuracy,
+       especially for accented speech and proper nouns. See the [codec guide](/voip/codec-guide)
+       for configuration examples.
 
-    2. **Check for echo** — Echo from a badly configured analogue gateway or ATA degrades STT.
-       Enable Acoustic Echo Cancellation (AEC) on your ATA or softphone.
+    2. **Check for echo** — Echo from a badly configured analogue gateway or ATA degrades
+       transcription accuracy. Enable Acoustic Echo Cancellation (AEC) on your ATA or softphone.
 
     3. **Check packet loss** — High packet loss fragments speech. Run a quick MOS test:
        ```bash

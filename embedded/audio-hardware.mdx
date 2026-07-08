@@ -24,9 +24,9 @@ For audio session configuration on iOS and Android, see
 | **Analogue** | Adafruit MAX9814 | 50–60 dB | Prototyping only | ADC noise floor limits STT accuracy; avoid in production |
 
 <Note>
-  Deepgram STT — the engine used by Humain Kiosk — performs best with microphones that deliver
-  **≥ 16 kHz sample rate** and **SNR ≥ 65 dB**. Below this threshold, word error rate increases
-  significantly in noisy environments.
+  Gemini Live — the model that handles live voice sessions — performs best with microphones
+  that deliver **≥ 16 kHz sample rate** and **SNR ≥ 65 dB**. Below this threshold, transcription
+  accuracy degrades significantly in noisy environments.
 </Note>
 
 ### Connecting to the C library

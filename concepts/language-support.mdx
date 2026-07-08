@@ -6,12 +6,19 @@ icon: "language"
 
 ## Overview
 
-When a kiosk is configured with multiple language personas, you can tell the server which language to use for a session by passing a BCP-47 language code. The server responds with:
+You can tell the server which language a session should use by passing a BCP-47 code as
+`preferred_language` when you open the session.
 
-- **`detected_language`** — the BCP-47 code the session will actually use (may differ from your request if the code is not configured on the kiosk).
-- **`disclosure_text`** — an EU AI Act disclosure string. Display this to the end user before or at the start of the conversation.
+<Warning>
+  **Language-keyed personas currently apply to voice sessions only.** If a kiosk has
+  `language_personas` configured, a **voice** session picks the matching persona for
+  `preferred_language` (falling back to the kiosk's default persona if no match). A **text**
+  session always uses the kiosk's single default persona, regardless of `preferred_language` —
+  language-persona selection is not yet wired into the text turn pipeline.
+</Warning>
 
-Both fields are optional from the server's side: if the kiosk has only one language, `detected_language` will reflect that language regardless of what you send, and `disclosure_text` will be empty if no disclosure is configured.
+`preferred_language` is echoed back as `detected_language` in the session-open response — the
+server does not perform real language detection today.
 
 ---
 
@@ -26,17 +33,25 @@ Both fields are optional from the server's side: if the kiosk has only one langu
 }
 ```
 
-`preferred_language` is optional — omit it entirely to let the server apply its default.
+`preferred_language` is optional — omit it entirely to use the kiosk's default persona/language.
 
 **Response (201)**:
 
 ```json
 {
   "session_id": "sess_…",
-  "detected_language": "tr",
-  "disclosure_text": "This conversation is handled by an AI assistant."
+  "agent_url": "https://api.humain.ai",
+  "detected_language": "tr"
 }
 ```
+
+<Note>
+  A `disclosure_text` field (an EU AI Act disclosure string) is planned for a future release but
+  is **not populated by the server today** — it is always omitted from the response. The SDK and
+  widget code below that reads `disclosureText` / `disclosure_text` is forward-compatible and
+  currently a no-op: it will start rendering the moment the backend populates the field, but
+  don't build a launch-blocking UI around it yet.
+</Note>
 
 ---
 
@@ -233,55 +248,46 @@ In the admin panel, go to **Settings → Humain Kiosk → Language** and choose 
 | **Fixed language** | Always sends the BCP-47 code you enter |
 | **Language selector** | Shows language buttons before the first message |
 
-The **AI disclosure** checkbox controls whether the disclosure banner is shown to visitors. The text itself is configured in your kiosk settings on the Humain admin panel.
-
----
+The **AI disclosure** checkbox controls whether the disclosure banner is shown to visitors. The text itself is configured in your kiosk settings on the Humain admin panel — note `disclosure_text` is not yet populated by the server (see the note above), so this banner will not render until that ships.
 
 ---
 
 ## Admin panel — configuring language personas
 
-Each language a kiosk should speak in requires a **language persona** configured in the admin panel:
+A kiosk can define a **language persona** per BCP-47 code under **Kiosk → Personas**:
 
 1. Open **Kiosk → Personas** and click **Add persona**.
 2. Set the **Language** field to a BCP-47 code (e.g. `tr`, `ar`, `de`).
-3. Write the system prompt in that language, or use the same prompt as the default persona —
-   the model reads the language from the session and responds accordingly.
-4. Optionally configure a **disclosure text** specific to that language.
-5. Save. The persona is active immediately for new sessions.
+3. Write the system prompt in that language, or use the same prompt as the default persona.
+4. Save.
 
-One persona is designated as the **default language**. If a client sends a `preferred_language`
-code that does not match any configured persona, the server uses the default and returns that
-code in `detected_language`.
+<Warning>
+  **This only affects voice sessions.** When a voice session opens with `preferred_language`
+  set, the server looks up `language_personas[preferred_language]` and uses it if present,
+  otherwise falls back to the kiosk's default persona. A **text** session ignores
+  `language_personas` entirely and always uses the kiosk's default persona — sending
+  `preferred_language: "tr"` on a text session does not change which persona is used, only
+  the (currently cosmetic) `detected_language` echoed back.
+</Warning>
 
 <Tip>
   With Gemini Live, you do not need to configure per-language STT or TTS voices. The model
-  handles all 90+ supported languages natively from a single persona configuration.
+  handles all 90+ supported languages natively — configuring `language_personas` only changes
+  which system prompt is used, not the model's ability to speak the language.
 </Tip>
-
----
-
-## Mid-session language mismatch
-
-Once a session is open, the language is fixed for its lifetime. To switch languages, close the
-current session and open a new one with the updated `preferred_language`.
-
-If a user switches their input language mid-session (e.g. starts in Turkish, then types in
-English), the AI will follow their input language in its response — the session's configured
-language persona provides the persona and tone, but the model mirrors the user's input language.
-This behaviour is automatic with Gemini Live and requires no server-side configuration.
 
 ---
 
 ## Gemini Live and language support
 
 Voice sessions run on **Gemini Live**, which natively supports 90+ languages from a single
-model. No per-language STT model or TTS voice configuration is needed — setting
-`preferred_language` on the session open request is all that's required.
+model — no per-language STT model or TTS voice configuration is needed. The model responds in
+whatever language the user speaks, independent of persona selection; `preferred_language` and
+`language_personas` only control which system prompt is loaded (see the warning above).
 
-For text sessions, the LLM also handles multilingual input without per-language configuration.
-The language persona sets the persona identity; the model adapts its language to the session's
-`preferred_language` setting.
+Text sessions use the same LLM for every language and handle multilingual input without any
+server-side configuration — but again, without a way to select a different persona per language
+today.
 
 ---
 
@@ -289,12 +295,10 @@ The language persona sets the persona identity; the model adapts its language to
 
 | Scenario | Result |
 |---|---|
-| `preferred_language` omitted | Server uses the kiosk's default language |
-| Code sent but not configured on kiosk | Server falls back to default; `detected_language` reflects the fallback |
-| Code matches a configured persona | Session uses that persona; `detected_language` echoes the code |
-| `disclosure_text` empty | No disclosure is configured on the kiosk; omit the banner |
-| User switches input language mid-session | AI mirrors the user's input language; persona stays the same |
+| `preferred_language` omitted | `detected_language` is omitted; default persona used |
+| `preferred_language` sent, **voice** mode | `detected_language` echoes the code; matching `language_personas` entry used if configured, else default persona |
+| `preferred_language` sent, **text** mode | `detected_language` echoes the code; default persona always used (language-persona selection not implemented for text) |
 
 <Note>
-The `preferred_language` field has no effect on kiosks with a single language. The server always returns the language the session will use in `detected_language`.
+The `preferred_language` field has no effect on which persona a text session uses. `detected_language` is always just an echo of what you sent, not a real detection result.
 </Note>

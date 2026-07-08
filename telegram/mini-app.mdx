@@ -1,0 +1,109 @@
+---
+title: "Telegram Mini App"
+description: "A full workspace-management app running inside Telegram's WebView — dashboards, kiosk management, sessions, and billing."
+icon: "device-mobile"
+---
+
+## What it is
+
+The Mini App is a standalone Next.js application (`kiosk-miniapp`, port 3002) that runs inside
+Telegram's in-app WebView, built with the [tma.js](https://docs.telegram-mini-apps.com/) SDK. It
+gives a linked user full workspace management without leaving Telegram.
+
+<Info>
+  Like every other Telegram feature, the Mini App requires the user's Telegram account to
+  already be linked to a Humain account. See [Telegram overview](/telegram/overview).
+</Info>
+
+---
+
+## Layouts
+
+Two route groups serve different entry points:
+
+**Full app** (`/dashboard`, `/kiosks`, `/kiosks/[id]`, `/kiosks/new`, `/analytics`, `/billing`,
+`/profile`) — a tabbed, full-screen experience with a header workspace switcher and bottom
+navigation. Opened from the bot's main menu button.
+
+**Compact views** (`/c/kiosk`, `/c/device`, `/c/session`, `/c/pay`) — lightweight detail pages
+with a Telegram `BackButton` that closes the Mini App. These are the targets of deep-link
+buttons the bot sends in chat (see below), not something a user navigates to directly.
+
+### What you can do
+
+- View dashboard stats (session counts, active kiosks, average turns, completion rate)
+- Browse, create, and view kiosk detail (persona, language, status)
+- View device detail and **issue or revoke device credentials** (one-time token reveal)
+- View session history and **end a live session**
+- View billing — usage, plans, PAYG bundles — and **pay with Telegram Stars**
+- Switch the active workspace
+
+---
+
+## Authentication
+
+The Mini App cannot use the admin panel's cookie-based session — Telegram's WebView does not
+reliably forward `SameSite=Strict` cookies. Instead:
+
+<Steps>
+  <Step title="Retrieve Telegram's signed init data">
+    On mount, the SDK calls `retrieveRawInitData()` to get the WebView's signed launch payload.
+  </Step>
+  <Step title="Exchange it for a Bearer session">
+    The client POSTs `{ init_data }` to `/api/v1/telegram/miniapp/auth`. The server validates the
+    HMAC signature per Telegram's algorithm (`secret_key = HMAC_SHA256("WebAppData", botToken)`,
+    constant-time compare, max age 24 hours), resolves the Telegram identity to a Humain user,
+    and returns a Bearer session token plus the user's workspaces.
+
+    If the Telegram account isn't linked, this returns `403 TELEGRAM_NOT_LINKED`.
+  </Step>
+  <Step title="Use the Bearer token on every request">
+    Unlike the admin panel, every subsequent API call sends `Authorization: Bearer <token>`
+    explicitly — there's no cookie to rely on.
+  </Step>
+</Steps>
+
+The session is cached in `sessionStorage` so returning to a compact view or reopening the app
+renders instantly and revalidates in the background. Only a confirmed `TELEGRAM_NOT_LINKED`
+clears the cached session — a transient network error does not log the user out.
+
+---
+
+## Deep links
+
+The bot sends inline buttons that open a specific compact view with context already loaded,
+instead of dropping the user on the dashboard.
+
+**Bot side** — builds a URL of the form:
+
+```
+https://t.me/{bot_username}/{app_short_name}?startapp={base64url(JSON payload)}[&mode=compact]
+```
+
+`app_short_name` is one of the Mini App short names configured in BotFather (`kiosk`, `device`,
+`session`). The JSON payload (e.g. `{"ws": "...", "id": "..."}`) is base64url-encoded with no
+padding and capped at 512 characters.
+
+**Mini App side** — reads `tgWebAppStartParam` from the URL on load, base64url-decodes it back
+to JSON, and each compact page reads the fields it needs (`c/kiosk` reads `payload.ws` and
+`payload.id`, for example).
+
+---
+
+## Theming
+
+The Mini App is fully theme-aware via the tma.js SDK: `themeParams.bindCssVars()` and
+`miniApp.bindCssVars()` expose Telegram's live theme as `--tg-theme-*` CSS custom properties
+(button color, hint color, text color, destructive color), used throughout the app. It also
+respects Telegram's fullscreen mode and safe-area insets.
+
+---
+
+## Paying with Stars in the Mini App
+
+The `/c/pay` compact view posts `{ workspace_id, plan_id | bundle_id }` to
+`/api/v1/telegram/stars/invoice` to get an `invoice_link`, then calls
+`window.Telegram.WebApp.openInvoice(link, callback)`. On a successful payment, it invalidates
+the billing queries so the updated plan/usage shows immediately. See
+[Stars payments](/telegram/payments) for the full payment flow, including the bot-side
+fulfillment logic.

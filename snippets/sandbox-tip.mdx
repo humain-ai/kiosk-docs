@@ -1,5 +1,6 @@
 <Tip>
-  During development, point at the **sandbox** environment so test conversations don't consume
-  production LLM credits. Set `mode: "sandbox"` in `HumainKioskClient` or use the sandbox base
-  URL `https://sandbox.api.humain.ai` directly.
+  During development, issue an **`hk_test_`** credential from the admin panel instead of a live
+  `hk_live_` one. Sandbox is a property of the credential, not a different base URL — you call
+  the same `https://api.humain.ai` host either way. Sandbox sessions don't consume production
+  LLM credits and aren't billed. See [Sandbox mode](/concepts/sandbox-mode).
 </Tip>

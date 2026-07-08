@@ -6,17 +6,21 @@ info:
     The Device API is consumed by physical kiosk terminals, VoIP adapters, and website
     widgets. All requests require a device credential issued from the Humain admin panel.
 
-    **Base URL — production:** `https://api.humain.ai`
-    **Base URL — sandbox:** `https://sandbox.api.humain.ai`
+    **Base URL:** `https://api.humain.ai` — there is no separate sandbox host. Sandbox is a
+    property of the credential, not the URL: issue an `hk_test_…` credential from the admin
+    panel and call the exact same endpoints. In sandbox mode, text sessions echo the input back
+    verbatim and voice sessions run a record → beep → echo loop — no LLM call is made, per-turn
+    guardrail/FraudGuard checks do not run, and no usage is billed. See
+    [Sandbox mode](/concepts/sandbox-mode).
 
-    Sandbox credentials (`hk_live_…`) work against the sandbox base URL only. Responses
-    are realistic but no real LLM credits are consumed and no usage is billed.
+    Opening a session returns an `agent_url` — use it as the base URL for every subsequent
+    real-time call (WebSocket, WebRTC, session end) instead of assuming the same host that
+    served `POST /v1/sessions`. In most deployments `agent_url` is the same public API host
+    behind a reverse proxy; treat it as opaque and always use the value returned.
 
 servers:
   - url: https://api.humain.ai
-    description: Production
-  - url: https://sandbox.api.humain.ai
-    description: Sandbox — safe for testing, no billing
+    description: Production and sandbox — sandbox behavior is selected by using an hk_test_ credential, not a different URL
 
 security:
   - DeviceToken: []
@@ -43,10 +47,12 @@ paths:
       summary: Open a session
       description: |
         Creates a new conversation session for the authenticated kiosk. Returns a
-        `session_id` that must be supplied to every subsequent session request.
+        `session_id` and an `agent_url` — every subsequent real-time call for this session
+        (WebSocket text, WebRTC voice, session end) goes to `agent_url`, not necessarily the
+        host that served this request.
 
         The `mode` field determines which interaction pattern is available:
-        - `text` — REST messages and WebSocket streaming
+        - `text` — WebSocket messaging (see [WebSocket streaming](/connections/websocket-streaming))
         - `voice` — WebRTC real-time audio
         - `voip` — SIP / VoIP telephony bridge
       requestBody:
@@ -86,8 +92,19 @@ paths:
                 $ref: "#/components/schemas/OpenSessionResponse"
               example:
                 session_id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                agent_url: "https://api.humain.ai"
                 detected_language: "tr"
-                disclosure_text: "This conversation is handled by an AI assistant."
+        "400":
+          description: A variable referenced by the persona was not provided.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: MISSING_REQUIRED_VARIABLE
+                message: "Required variable not provided: booking_ref"
+                details:
+                  variable: booking_ref
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "402":
@@ -101,71 +118,85 @@ paths:
         "503":
           $ref: "#/components/responses/ProviderError"
 
-  /v1/sessions/{sid}/message:
+  /v1/sessions/{sid}/ws-ticket:
     post:
-      operationId: sendMessage
+      operationId: mintWSTicket
       tags: [Sessions]
-      summary: Send a message
+      summary: Mint a WebSocket auth ticket
       description: |
-        Sends a text input to the AI and returns the complete response. The guardrail
-        pipeline runs on both the input and the output before the response is returned.
+        Mints a short-lived, single-use ticket so a browser can authenticate the WebSocket
+        upgrade in `GET {agent_url}/v1/sessions/{sid}/ws`. Browsers cannot set an
+        `Authorization` header on a WebSocket handshake, so the raw device token never
+        appears in the WS URL — pass this ticket as `?ticket=` instead.
 
-        For streaming token-by-token output, use the WebSocket endpoint instead.
+        Non-browser clients (native apps, servers, embedded devices) can skip this call
+        entirely and send `Authorization: Bearer` directly on the WS upgrade.
       parameters:
         - $ref: "#/components/parameters/SessionId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/MessageRequest"
-            example:
-              input: "What are your opening hours?"
       responses:
-        "200":
-          description: AI response
+        "201":
+          description: Ticket issued
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/WSTicketResponse"
               example:
-                response: "We are open Monday to Friday, 9 AM to 6 PM."
-                actions_called: []
-        "400":
-          $ref: "#/components/responses/InputRejected"
+                ticket: "wst_8f2a1c4e9b7d3f6a0c5e2b8d1a4f7c9e"
+                expires_in: 30
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
-          $ref: "#/components/responses/Forbidden"
-        "429":
-          $ref: "#/components/responses/RateLimited"
-        "503":
-          $ref: "#/components/responses/ProviderError"
+          description: Session belongs to a different credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Session not found or expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
-  /v1/sessions/{sid}/stream:
+  /v1/sessions/{sid}/ws:
     get:
-      operationId: streamSession
+      operationId: streamSessionWS
       tags: [Sessions]
-      summary: Stream session (WebSocket)
+      summary: Text session (WebSocket)
       description: |
-        Upgrades the HTTP connection to a WebSocket for streaming text responses
-        token by token. This endpoint uses the standard HTTP `101 Switching Protocols`
-        response.
+        Upgrades to a WebSocket for text conversation turns. **Served on `agent_url`**, the
+        base URL returned by `POST /v1/sessions` — not necessarily the host that served that
+        request. Standard HTTP `101 Switching Protocols` response.
 
-        **Sending a message** — send a JSON frame:
+        **Auth** — non-browser clients send `Authorization: Bearer <token>` on the upgrade
+        request. Browsers cannot set that header on a WS handshake, so first call
+        `POST /v1/sessions/{sid}/ws-ticket` and pass the result as `?ticket=<raw>`.
+
+        **Sending a message** — one JSON text frame per turn:
         ```json
-        {"input": "What are your opening hours?"}
+        {"type": "message", "content": "What are your opening hours?"}
         ```
 
-        **Receiving events** — the server streams typed frames:
+        **Receiving a response**:
         ```json
-        {"type": "turn_start"}
-        {"type": "chunk", "content": "We "}
-        {"type": "chunk", "content": "are open Monday to Friday."}
-        {"type": "turn_end", "message_count": 2}
+        {"type": "response", "content": "We are open Monday to Friday, 9 AM–6 PM.", "message_id": "3fa85f64-..."}
         ```
 
-        **Errors** — the server sends a close frame with a 4xxx code on fatal errors.
+        **Errors** arrive as a JSON frame on the same connection — the WebSocket is not
+        closed with a 4xxx code:
+        ```json
+        {"type": "error", "code": "TURN_ERROR", "message": "INPUT_REJECTED: Contains a blocked phrase."}
+        ```
+        The `code` field is `TURN_ERROR` for any pipeline failure (guardrail rejection,
+        FraudGuard block, rate limit, provider error); the real machine-readable reason is
+        the `SCREAMING_SNAKE_CASE` prefix of `message`, before the first `: `. `SESSION_ENDED`
+        and `SERVICE_UNAVAILABLE` are sent as distinct `code` values.
+
+        **Session expiry warning** — sent once, `SESSION_TIME_WARNING_SECONDS` (default 60s)
+        before the session's time limit:
+        ```json
+        {"type": "session_expiring", "message": "Your session will expire in 60 seconds."}
+        ```
       parameters:
         - $ref: "#/components/parameters/SessionId"
       responses:
@@ -175,6 +206,12 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Session not found or expired (manifest not in Redis).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/sessions/{sid}/end:
     post:
@@ -182,10 +219,13 @@ paths:
       tags: [Sessions]
       summary: End a session
       description: |
-        Closes the session, flushes usage events, and releases server resources.
+        Closes the session, flushes usage events, and releases server resources. **Served on
+        `agent_url`**, not necessarily the host that served `POST /v1/sessions`.
         Always call this endpoint when the conversation ends — sessions left open are
-        cleaned up automatically after 4 hours of inactivity, but calling end explicitly is faster
-        and more accurate for billing.
+        cleaned up automatically after the session's time limit (default 4 hours,
+        `end_reason: time_limit`) or after a period of inactivity (`end_reason: abandoned`),
+        but calling `end` explicitly (`end_reason: clean`) is faster and more accurate for
+        billing.
       parameters:
         - $ref: "#/components/parameters/SessionId"
       responses:
@@ -204,11 +244,21 @@ paths:
       tags: [Voice (WebRTC)]
       summary: Exchange WebRTC SDP offer
       description: |
-        Sends the client's SDP offer and returns the server's SDP answer. Call this after
-        `RTCPeerConnection.createOffer()` and `setLocalDescription()`. Once you receive
+        Sends the client's SDP offer and returns the server's SDP answer. **Served on
+        `agent_url`**, not necessarily the host that served `POST /v1/sessions`. Call this
+        after `RTCPeerConnection.createOffer()` and `setLocalDescription()`. Once you receive
         the answer, call `setRemoteDescription()` on the peer connection.
 
-        ICE candidates can be submitted concurrently via `POST /v1/sessions/{sid}/webrtc/ice`.
+        Requires a session opened with `mode: voice` or `mode: voip` — any other mode
+        returns `400 INVALID_MODE`.
+
+        ICE candidates can be submitted concurrently via `POST {agent_url}/v1/sessions/{sid}/webrtc/ice`.
+        Prefer the `ice_servers` array returned by `POST /v1/sessions` (when present) over
+        hardcoding a STUN server.
+
+        The answer negotiates a data channel named `control` (id 0) carrying JSON control
+        events — `{"type":"session_expiring","seconds_left":N}` and
+        `{"type":"error","code":"SESSION_ENDED","message":"..."}`.
       parameters:
         - $ref: "#/components/parameters/SessionId"
       requestBody:
@@ -224,12 +274,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WebRTCOfferResponse"
+        "400":
+          description: Invalid mode or malformed SDP.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                invalidMode:
+                  summary: Session is not voice/voip
+                  value:
+                    error: INVALID_MODE
+                    message: Session must be in voice or voip mode to use WebRTC
+                    details: {}
+                invalidSDP:
+                  summary: Malformed SDP offer
+                  value:
+                    error: INVALID_SDP
+                    message: Failed to parse SDP offer.
+                    details: {}
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
           $ref: "#/components/responses/Forbidden"
         "503":
-          $ref: "#/components/responses/ProviderError"
+          description: Voice pipeline is not enabled on this server, or the provider is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/sessions/{sid}/webrtc/ice:
     post:
@@ -238,8 +311,10 @@ paths:
       summary: Submit ICE candidate
       description: |
         Submits a WebRTC ICE candidate discovered by the client during the connection
-        establishment phase. Call this for each candidate emitted by the
-        `RTCPeerConnection.onicecandidate` event.
+        establishment phase. **Served on `agent_url`**, not necessarily the host that served
+        `POST /v1/sessions`. Call this for each candidate emitted by the
+        `RTCPeerConnection.onicecandidate` event, after a successful
+        `POST {agent_url}/v1/sessions/{sid}/webrtc/offer`.
       parameters:
         - $ref: "#/components/parameters/SessionId"
       requestBody:
@@ -251,6 +326,36 @@ paths:
       responses:
         "204":
           description: ICE candidate accepted — no body returned
+        "400":
+          description: |
+            One of:
+            - `NO_WEBRTC_SESSION` — `webrtc/offer` was never called for this session
+            - `WEBRTC_RECONNECT_REQUIRED` — the previous peer connection was closed; call
+              `webrtc/offer` again to re-negotiate
+            - `INVALID_CANDIDATE` — the candidate could not be parsed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                noSession:
+                  summary: offer never called
+                  value:
+                    error: NO_WEBRTC_SESSION
+                    message: "WebRTC session not found — call /webrtc/offer first"
+                    details: {}
+                reconnectRequired:
+                  summary: peer connection closed
+                  value:
+                    error: WEBRTC_RECONNECT_REQUIRED
+                    message: "WebRTC connection closed — call /webrtc/offer again to reconnect"
+                    details: {}
+                invalidCandidate:
+                  summary: malformed candidate
+                  value:
+                    error: INVALID_CANDIDATE
+                    message: Failed to parse ICE candidate.
+                    details: {}
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "403":
@@ -505,13 +610,14 @@ components:
     DeviceToken:
       type: http
       scheme: bearer
-      bearerFormat: hk_live_{43-char-base64url}
+      bearerFormat: hk_live_{43-char-base64url} | hk_test_{43-char-base64url}
       description: |
         Device credential issued from the Humain admin panel under
         **Kiosk → Credentials → Issue new credential**.
 
-        Format: `hk_live_` followed by 43 base64url characters (32 random bytes).
-        The raw token is shown only once at creation time and is never stored in plain text.
+        Format: `hk_live_` (production) or `hk_test_` (sandbox) followed by 43 base64url
+        characters (32 random bytes). The raw token is shown only once at creation time and
+        is never stored in plain text.
 
     AdminSession:
       type: apiKey
@@ -586,43 +692,59 @@ components:
           type: string
           format: uuid
           description: Unique session identifier — pass this to all subsequent calls.
+        agent_url:
+          type: string
+          format: uri
+          description: |
+            Base URL for every real-time call on this session — the WebSocket
+            (`GET {agent_url}/v1/sessions/{sid}/ws`), WebRTC signalling
+            (`POST {agent_url}/v1/sessions/{sid}/webrtc/offer` and `.../ice`), and
+            `POST {agent_url}/v1/sessions/{sid}/end`. Do not assume it equals the host that
+            served this request. Treat it as opaque — in most deployments it is the same
+            public API host behind a reverse proxy.
+          example: "https://api.humain.ai"
         detected_language:
           type: string
           description: |
-            BCP-47 code of the language the session will use. May differ from
-            `preferred_language` if the requested language is not configured on the kiosk;
-            in that case the server falls back to the kiosk's default language.
+            Currently just echoes the `preferred_language` you sent — the server does not yet
+            perform real language detection. Omitted if `preferred_language` was not sent.
           example: "tr"
         disclosure_text:
           type: string
           description: |
-            EU AI Act disclosure string configured for this kiosk. Display this to the end
-            user before or at the start of the conversation. Empty string when no disclosure
-            is configured.
-          example: "This conversation is handled by an AI assistant."
+            Reserved for a forthcoming EU AI Act disclosure feature. **Not yet populated by
+            the server** — always omitted from the response today. Do not build a UI that
+            depends on this field appearing.
+        ice_servers:
+          type: array
+          description: |
+            TURN/STUN server credentials, present only when TURN relay is configured for
+            this workspace. Pass directly to `RTCPeerConnection`'s `iceServers` config.
+          items:
+            $ref: "#/components/schemas/ICEServerConfig"
 
-    MessageRequest:
-      type: object
-      required: [input]
-      properties:
-        input:
-          type: string
-          maxLength: 4096
-          description: The user's text input.
-
-    MessageResponse:
+    ICEServerConfig:
       type: object
       properties:
-        response:
-          type: string
-          description: The AI's complete text response after guardrail processing.
-        actions_called:
+        urls:
           type: array
           items:
             type: string
-          description: |
-            Names of action endpoints invoked during this turn (e.g. `fetch_availability`).
-            Empty array if no tools were called.
+          example: ["turn:turn.humain.ai:3478", "stun:turn.humain.ai"]
+        username:
+          type: string
+        credential:
+          type: string
+
+    WSTicketResponse:
+      type: object
+      properties:
+        ticket:
+          type: string
+          description: Single-use ticket. Pass as `?ticket=` on the WebSocket upgrade URL.
+        expires_in:
+          type: integer
+          description: Seconds until the ticket expires if unused (default 30s).
 
     WebRTCOfferRequest:
       type: object

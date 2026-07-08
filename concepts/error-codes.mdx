@@ -36,14 +36,28 @@ Every error response uses the same JSON envelope:
 |---|---|---|---|
 | 400 | `INPUT_REJECTED` | Guardrail rule or FraudGuard blocked the user's input | Show a neutral message; do not retry |
 | 400 | `SESSION_ENDED` | Session already closed or time limit reached | Open a new session |
+| 400 | `MISSING_REQUIRED_VARIABLE` | A `{{variable}}` referenced by the persona was not provided in `conversation_initiation_data.variables` at session open | Include the missing variable; see [Dynamic variables](/guides/dynamic-variables) |
+| 400 | `INVALID_MODE` | Called `webrtc/offer` on a session that isn't `voice` or `voip` | Open the session with the correct `mode` |
+| 400 | `INVALID_SDP` | The SDP offer sent to `webrtc/offer` could not be parsed | Check `RTCPeerConnection.createOffer()` output |
+| 400 | `INVALID_CANDIDATE` | The ICE candidate sent to `webrtc/ice` could not be parsed | Check the candidate string from `onicecandidate` |
+| 400 | `NO_WEBRTC_SESSION` | `webrtc/ice` called before `webrtc/offer` for this session | Call `webrtc/offer` first |
+| 400 | `WEBRTC_RECONNECT_REQUIRED` | The peer connection closed; `webrtc/ice` can't add candidates to it | Call `webrtc/offer` again to re-negotiate |
 | 401 | `UNAUTHENTICATED` | Missing, malformed, or revoked device token | Check credential format and expiry |
 | 402 | `PLAN_LIMIT_REACHED` | Workspace has hit its plan's session or message ceiling | Upgrade plan or reduce usage |
 | 403 | `KIOSK_INACTIVE` | The kiosk's status in the admin panel is not *active* | Activate the kiosk in the admin panel |
 | 403 | `CREDENTIAL_BLOCKED` | FraudGuard blocked this credential due to suspicious activity | Wait until `blocked_until`; contact support if incorrect |
+| 404 | `SESSION_NOT_FOUND` | The session manifest isn't in Redis — expired, never created, or the agent restarted before the first WS/WebRTC connection | Open a new session |
 | 422 | `VALIDATION_ERROR` | Request body failed schema validation | Fix the request body per `details` field |
 | 429 | `RATE_LIMITED` | Too many requests — back off and retry | Wait `retry_after_seconds` before retrying |
 | 500 | `INTERNAL_ERROR` | Unexpected server error | Retry with exponential back-off; contact support if persistent |
-| 503 | `PROVIDER_ERROR` | LLM, STT, or TTS provider is temporarily unavailable | Retry with exponential back-off (1 s, 2 s, 4 s) |
+| 503 | `VOICE_NOT_ENABLED` | Voice pipeline is not enabled on this deployment | Contact your Humain workspace admin |
+| 503 | `PROVIDER_ERROR` | LLM or voice provider is temporarily unavailable | Retry with exponential back-off (1 s, 2 s, 4 s) |
+
+<Note>
+  `TURN_ERROR` and `SERVICE_UNAVAILABLE` are **not** HTTP status codes — they only appear as the
+  `code` field of a WebSocket `error` frame during a text turn. See
+  [Handling WebSocket errors](#handling-websocket-errors-conversation-turns) below.
+</Note>
 
 ## Codes with structured details
 
@@ -112,17 +126,22 @@ messages.
 }
 ```
 
-## Handling errors in code
+## Handling HTTP errors (session open/end)
+
+`POST /v1/sessions` and `POST {agent_url}/v1/sessions/{sid}/end` use the standard error
+envelope above. Text conversation turns run over a WebSocket, not HTTP — see
+[WebSocket streaming](/connections/websocket-streaming#error-frames) for how errors surface
+there instead (a `{"type":"error",...}` frame on the same connection, not an HTTP status code).
 
 <CodeGroup>
 ```javascript JavaScript
-const response = await fetch(`${BASE_URL}/v1/sessions/${sid}/message`, {
+const response = await fetch(`${BASE_URL}/v1/sessions`, {
   method: 'POST',
   headers: {
     'Authorization': `Bearer ${token}`,
     'Content-Type': 'application/json',
   },
-  body: JSON.stringify({ input }),
+  body: JSON.stringify({ mode: 'text' }),
 });
 
 if (!response.ok) {
@@ -134,16 +153,8 @@ if (!response.ok) {
       await sleep(retryAfter * 1000);
       return retry();
 
-    case 'INPUT_REJECTED':
-      showUserMessage('I cannot help with that request.');
-      return;
-
-    case 'SESSION_ENDED':
-      await openNewSession();
-      return;
-
-    case 'PROVIDER_ERROR':
-      showUserMessage('AI is temporarily unavailable. Please try again in a moment.');
+    case 'PLAN_LIMIT_REACHED':
+      showUserMessage('This kiosk has reached its plan limit.');
       return;
 
     default:
@@ -157,14 +168,11 @@ if (!response.ok) {
 import httpx
 import time
 
-def send_message(session_id: str, text: str, *, retries: int = 3):
+def open_session(*, retries: int = 3):
     for attempt in range(retries):
-        resp = client.post(
-            f"/v1/sessions/{session_id}/message",
-            json={"input": text},
-        )
+        resp = client.post("/v1/sessions", json={"mode": "text"})
 
-        if resp.status_code == 200:
+        if resp.status_code == 201:
             return resp.json()
 
         err = resp.json()
@@ -175,9 +183,6 @@ def send_message(session_id: str, text: str, *, retries: int = 3):
             time.sleep(wait)
             continue
 
-        if code == "INPUT_REJECTED":
-            raise ValueError("Input rejected: " + err["message"])
-
         if code == "PROVIDER_ERROR" and attempt < retries - 1:
             time.sleep(2 ** attempt)
             continue
@@ -185,3 +190,37 @@ def send_message(session_id: str, text: str, *, retries: int = 3):
         raise RuntimeError(f"Humain API error [{code}]: {err['message']}")
 ```
 </CodeGroup>
+
+## Handling WebSocket errors (conversation turns)
+
+Errors during a turn arrive as a JSON frame on the open connection with `code: "TURN_ERROR"` —
+the real machine-readable reason is the `SCREAMING_SNAKE_CASE` prefix of `message`, before the
+first `: `.
+
+```javascript
+ws.onmessage = (event) => {
+  const frame = JSON.parse(event.data);
+
+  if (frame.type === 'error') {
+    if (frame.code === 'SESSION_ENDED') {
+      openNewSession();
+      return;
+    }
+    // TURN_ERROR wraps the real reason as a "REASON_CODE: message" prefix
+    const reason = frame.message?.split(':')[0];
+    switch (reason) {
+      case 'INPUT_REJECTED':
+        showUserMessage('I cannot help with that request.');
+        return;
+      case 'RATE_LIMITED':
+        showUserMessage('Please slow down and try again shortly.');
+        return;
+      case 'PROVIDER_ERROR':
+        showUserMessage('AI is temporarily unavailable. Please try again in a moment.');
+        return;
+      default:
+        console.error('Humain turn error', frame.message);
+    }
+  }
+};
+```

@@ -1,36 +1,54 @@
 ---
-title: "REST — text messaging"
-description: "Send text messages and receive complete AI responses over plain HTTPS. The simplest integration path."
+title: "REST — text session setup"
+description: "Open a text session, authenticate the realtime connection, and close it — over plain HTTPS. Conversation turns themselves run over WebSocket."
 ---
 
 ## How it works
 
-Text mode uses standard HTTP request/response. You open a session, send one or more messages, and
-close the session. Each message call waits for the full AI response before returning. For streaming
-token-by-token output, use [WebSocket streaming](/connections/websocket-streaming) instead.
+There is no REST endpoint for sending a message and getting a reply — text conversation turns
+run exclusively over a WebSocket (see [WebSocket streaming](/connections/websocket-streaming)).
+HTTP is used for three things around that connection: opening the session, minting a
+short-lived ticket so a browser can authenticate the WebSocket upgrade, and closing the session.
 
 ```mermaid
 sequenceDiagram
   participant D as Device
-  participant A as Humain API
+  participant S as Humain API (server)
+  participant AG as Humain API (agent_url)
 
-  D->>A: POST /v1/sessions {"mode":"text"}
-  A-->>D: 201 {"session_id":"..."}
+  D->>S: POST /v1/sessions {"mode":"text"}
+  S-->>D: 201 {"session_id":"...","agent_url":"..."}
 
-  loop Conversation turns
-    D->>A: POST /v1/sessions/{sid}/message {"input":"..."}
-    A-->>D: 200 {"response":"...","actions_called":[]}
+  D->>S: POST /v1/sessions/{sid}/ws-ticket
+  S-->>D: 201 {"ticket":"...","expires_in":30}
+
+  D->>AG: GET /v1/sessions/{sid}/ws?ticket=...
+  AG-->>D: 101 Switching Protocols
+
+  loop Conversation turns (over the WebSocket)
+    D->>AG: {"type":"message","content":"..."}
+    AG-->>D: {"type":"response","content":"...","message_id":"..."}
   end
 
-  D->>A: POST /v1/sessions/{sid}/end
-  A-->>D: 204
+  D->>AG: POST /v1/sessions/{sid}/end
+  AG-->>D: 204
 ```
+
+<Note>
+  `agent_url` is the base URL for every real-time call — the WebSocket upgrade, and `end`. In
+  most deployments it is the same public API host behind a reverse proxy; always use the value
+  returned rather than assuming it matches the host you called to open the session.
+</Note>
+
+The `ws-ticket` step is **only needed for browser clients** — browsers cannot set an
+`Authorization` header on a WebSocket handshake. Non-browser clients (native apps, servers,
+embedded devices) can skip it and send `Authorization: Bearer` directly on the WS upgrade.
 
 ## Step-by-step integration
 
 <Steps>
   <Step title="Open a session">
-    Call `POST /v1/sessions` with `mode: "text"`. Store the returned `session_id`.
+    Call `POST /v1/sessions` with `mode: "text"`. Store the returned `session_id` and `agent_url`.
 
     <CodeGroup>
     ```bash cURL
@@ -38,11 +56,11 @@ sequenceDiagram
       -H "Authorization: Bearer hk_live_your_credential_here" \
       -H "Content-Type: application/json" \
       -d '{"mode":"text"}'
-    # → {"session_id":"3fa85f64-5717-4562-b3fc-2c963f66afa6"}
+    # → {"session_id":"3fa85f64-5717-4562-b3fc-2c963f66afa6","agent_url":"https://api.humain.ai"}
     ```
 
     ```javascript JavaScript
-    const { session_id } = await fetch('https://api.humain.ai/v1/sessions', {
+    const { session_id, agent_url } = await fetch('https://api.humain.ai/v1/sessions', {
       method: 'POST',
       headers: {
         'Authorization': 'Bearer hk_live_your_credential_here',
@@ -54,7 +72,8 @@ sequenceDiagram
 
     ```python Python
     resp = client.post('/v1/sessions', json={'mode': 'text'})
-    session_id = resp.json()['session_id']
+    data = resp.json()
+    session_id, agent_url = data['session_id'], data['agent_url']
     ```
 
     ```go Go
@@ -68,133 +87,98 @@ sequenceDiagram
     </CodeGroup>
   </Step>
 
-  <Step title="Send messages">
-    POST to `/v1/sessions/{sid}/message` with the user's text. The response includes the AI's
-    complete reply and any action endpoints called during the turn.
+  <Step title="Mint a WebSocket ticket (browser clients only)">
+    Browsers cannot set an `Authorization` header on a WebSocket upgrade. POST here first and
+    pass the returned ticket as `?ticket=` on the WS URL instead. Non-browser clients skip this
+    step and use the Bearer header directly on the upgrade request.
 
     <CodeGroup>
     ```bash cURL
-    curl -X POST https://api.humain.ai/v1/sessions/$SESSION_ID/message \
-      -H "Authorization: Bearer hk_live_your_credential_here" \
-      -H "Content-Type: application/json" \
-      -d '{"input":"What are your opening hours?"}'
-    # → {"response":"We are open Monday to Friday, 9 AM–6 PM.","actions_called":[]}
+    curl -X POST https://api.humain.ai/v1/sessions/$SESSION_ID/ws-ticket \
+      -H "Authorization: Bearer hk_live_your_credential_here"
+    # → {"ticket":"wst_...","expires_in":30}
     ```
 
     ```javascript JavaScript
-    const { response, actions_called } = await fetch(
-      `https://api.humain.ai/v1/sessions/${session_id}/message`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer hk_live_your_credential_here',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ input: userText }),
-      }
+    const { ticket } = await fetch(
+      `${agent_url}/v1/sessions/${session_id}/ws-ticket`,
+      { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } }
     ).then(r => r.json());
 
-    console.log(response); // Display to the user
-    ```
-
-    ```python Python
-    data = client.post(
-        f'/v1/sessions/{session_id}/message',
-        json={'input': user_text},
-    ).json()
-
-    print(data['response'])
-    ```
-
-    ```go Go
-    payload := fmt.Sprintf(`{"input":%q}`, userText)
-    req, _ := http.NewRequestWithContext(ctx, "POST",
-        "https://api.humain.ai/v1/sessions/"+sessionID+"/message",
-        strings.NewReader(payload))
-    req.Header.Set("Authorization", "Bearer hk_live_your_credential_here")
-    req.Header.Set("Content-Type", "application/json")
-    resp, _ := http.DefaultClient.Do(req)
+    const ws = new WebSocket(
+      `${agent_url.replace('https://', 'wss://')}/v1/sessions/${session_id}/ws?ticket=${ticket}`
+    );
     ```
     </CodeGroup>
+
+    Tickets are single-use and expire in `expires_in` seconds (default 30) if unused. See
+    [WebSocket streaming](/connections/websocket-streaming) for the full connection and message
+    protocol — that page covers sending/receiving turns, error frames, and reconnection.
   </Step>
 
   <Step title="End the session">
-    Always call `POST /v1/sessions/{sid}/end` when the conversation finishes.
+    Always call `end` on `agent_url` when the conversation finishes.
 
     <CodeGroup>
     ```bash cURL
-    curl -X POST https://api.humain.ai/v1/sessions/$SESSION_ID/end \
+    curl -X POST $AGENT_URL/v1/sessions/$SESSION_ID/end \
       -H "Authorization: Bearer hk_live_your_credential_here"
     # → 204 No Content
     ```
 
     ```javascript JavaScript
-    await fetch(`https://api.humain.ai/v1/sessions/${session_id}/end`, {
+    await fetch(`${agent_url}/v1/sessions/${session_id}/end`, {
       method: 'POST',
       headers: { 'Authorization': 'Bearer hk_live_your_credential_here' },
     });
     ```
 
     ```python Python
-    client.post(f'/v1/sessions/{session_id}/end')
+    client.post(f'{agent_url}/v1/sessions/{session_id}/end')
     ```
 
     ```go Go
     req, _ := http.NewRequestWithContext(ctx, "POST",
-        "https://api.humain.ai/v1/sessions/"+sessionID+"/end", nil)
+        agentURL+"/v1/sessions/"+sessionID+"/end", nil)
     req.Header.Set("Authorization", "Bearer hk_live_your_credential_here")
     http.DefaultClient.Do(req)
     ```
     </CodeGroup>
+
+    Calling `end` on an already-closed session returns `400 SESSION_ENDED`.
   </Step>
 </Steps>
-
-## Response fields
-
-<ResponseField name="response" type="string">
-  The AI's complete text response after all guardrail and PII processing.
-</ResponseField>
-
-<ResponseField name="actions_called" type="string[]">
-  Names of any action endpoints (tools) called during this turn. Empty array if no tools were
-  invoked. Useful for debugging and audit logging.
-</ResponseField>
 
 ## Advanced topics
 
 <AccordionGroup>
   <Accordion title="Handling guardrail rejections">
-    If the user's input triggers a guardrail rule, the API returns `400 INPUT_REJECTED` instead
-    of a message response. Display a neutral message to the user and do not retry automatically.
+    If the user's input triggers a guardrail rule, the WebSocket sends
+    `{"type":"error","code":"TURN_ERROR","message":"INPUT_REJECTED: ..."}` instead of a
+    response frame. Display a neutral message to the user and do not retry automatically —
+    see [WebSocket streaming](/connections/websocket-streaming#error-frames) for the full error
+    frame format.
 
     ```javascript
-    if (response.status === 400) {
-      const err = await response.json();
-      if (err.error === 'INPUT_REJECTED') {
-        displayToUser("I'm not able to help with that request.");
-        return; // Don't retry
+    ws.onmessage = (event) => {
+      const frame = JSON.parse(event.data);
+      if (frame.type === 'error') {
+        if (frame.message?.startsWith('INPUT_REJECTED')) {
+          displayToUser("I'm not able to help with that request.");
+          return; // Don't retry
+        }
       }
-    }
+    };
     ```
   </Accordion>
   <Accordion title="Retrying on provider errors">
-    `503 PROVIDER_ERROR` means the LLM is temporarily unavailable. Use exponential back-off:
-    wait 1 s, then 2 s, then 4 s. Cap at 3 retries. If still failing, surface a generic error.
-
-    ```javascript
-    async function sendWithRetry(sessionId, input, attempt = 0) {
-      const resp = await fetch(/* ... */);
-      if (resp.status === 503 && attempt < 3) {
-        await sleep((2 ** attempt) * 1000);
-        return sendWithRetry(sessionId, input, attempt + 1);
-      }
-      return resp.json();
-    }
-    ```
+    A `PROVIDER_ERROR`-prefixed message means the LLM is temporarily unavailable. Close and
+    reopen a new WebSocket connection with exponential back-off: wait 1 s, then 2 s, then 4 s.
+    Cap at 3 retries. If still failing, surface a generic error.
   </Accordion>
-  <Accordion title="Connection pooling (server-side devices)">
-    For high-throughput server-side integrations, reuse HTTP connections with `keep-alive`.
-    In Node.js use a shared `http.Agent`; in Python use a single `httpx.Client` instance;
-    in Go use the default `http.DefaultTransport` (already pooled).
+  <Accordion title="Sandbox mode">
+    Sessions opened with an `hk_test_` credential echo the user's message back verbatim over
+    the WebSocket — no LLM call is made and no usage is billed. Useful for testing your
+    integration end-to-end before going live. See [Sandbox mode](/concepts/sandbox-mode).
   </Accordion>
 </AccordionGroup>

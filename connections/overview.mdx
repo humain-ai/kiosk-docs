@@ -4,18 +4,20 @@ description: "Choose the right transport for your channel. Humain supports REST,
 ---
 
 Humain exposes one API surface for all channel types. The `mode` you set when opening a session
-determines which transport patterns are available.
+determines which transport patterns are available. HTTP (REST) is used for session lifecycle —
+open, ticket, end — in every mode; the conversation itself always runs over WebSocket (text) or
+WebRTC (voice/voip). There is no REST endpoint for sending a text message and getting a reply.
 
 ## At a glance
 
 <Columns cols={2}>
-  <Card title="REST — text messaging" icon="send" href="/connections/rest-text">
-    Send a message, wait for the complete AI response. Simple, stateless request/response.
-    Best for backend integrations and low-frequency interactions.
+  <Card title="REST — text session setup" icon="send" href="/connections/rest-text">
+    Open a session, mint a WebSocket ticket, close a session — all plain HTTPS. The conversation
+    turns themselves happen over the WebSocket described below.
   </Card>
   <Card title="WebSocket — streaming" icon="bolt" href="/connections/websocket-streaming">
-    Open a persistent connection and receive response tokens as they are generated. Delivers
-    the fastest perceived latency for chat interfaces.
+    Open a persistent connection and exchange conversation turns. The only way to send and
+    receive text messages.
   </Card>
   <Card title="WebRTC — real-time voice" icon="microphone" href="/connections/webrtc-voice">
     Full-duplex audio over WebRTC. Server-side VAD, barge-in support, and sub-200 ms latency.
@@ -31,23 +33,25 @@ determines which transport patterns are available.
 
 | | REST | WebSocket | WebRTC voice | VoIP / SIP |
 |---|---|---|---|---|
-| Response style | Full response after inference | Streamed token-by-token | Real-time audio | Real-time audio |
-| Best for | Backend integrations, low-frequency calls | Chat UIs, kiosk touchscreens | Hands-free terminals, drive-throughs | Call centres, IVR, PSTN callers |
+| Carries conversation turns | ❌ No — session lifecycle only | ✅ Yes — the only text transport | ✅ Yes | ✅ Yes |
+| Best for | Opening/closing sessions in any mode | Chat UIs, kiosk touchscreens, any text integration | Hands-free terminals, drive-throughs | Call centres, IVR, PSTN callers |
 | Requires | HTTPS client | WebSocket client | WebRTC runtime (browser or pion) | SIP stack or PBX |
 | Testable in browser | ✅ Yes | ✅ Yes | ✅ Yes (with mic permission) | ❌ No — needs telephony hardware |
 
 ## Which one should I use?
 
-| Scenario | Recommended transport |
+Every mode uses REST to open and close the session. The question is which mode fits your channel:
+
+| Scenario | Recommended mode |
 |---|---|
-| Website chat widget with streaming | WebSocket |
-| Backend server calling the AI | REST |
-| Touchscreen kiosk with typed input | REST or WebSocket |
-| Hands-free kiosk or terminal | WebRTC voice |
-| Drive-through ordering | WebRTC voice |
-| Call centre / IVR replacement | VoIP / SIP |
-| Phone support from mobile app | WebRTC voice |
-| IoT / embedded device | REST |
+| Website chat widget with streaming | `text` (WebSocket) |
+| Backend server calling the AI | `text` (WebSocket) |
+| Touchscreen kiosk with typed input | `text` (WebSocket) |
+| Hands-free kiosk or terminal | `voice` (WebRTC) |
+| Drive-through ordering | `voice` (WebRTC) |
+| Call centre / IVR replacement | `voip` (SIP) |
+| Phone support from mobile app | `voice` (WebRTC) |
+| IoT / embedded device | `text` (WebSocket) |
 
 ## Mixing transports within a session
 
@@ -58,10 +62,9 @@ Open a new session if the user's channel changes (e.g. a chat user initiates a v
 
 | Transport | First-token latency | Typical end-to-end |
 |---|---|---|
-| REST (text) | N/A — full response | 1–3 s |
-| WebSocket (streaming) | ~300 ms | Streams until done |
-| WebRTC (voice) | ~150 ms (STT round-trip) | Near real-time |
-| VoIP / SIP | ~200 ms (STT round-trip) | Near real-time |
+| WebSocket (text) | N/A — full response returned per turn | 1–3 s |
+| WebRTC (voice) | ~150 ms | Near real-time |
+| VoIP / SIP | ~200 ms | Near real-time |
 
 <Note>
   Latency figures are for the sandbox and production environments with a warm connection. Cold

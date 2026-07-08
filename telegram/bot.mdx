@@ -1,0 +1,117 @@
+---
+title: "Telegram bot"
+description: "Manage kiosks and devices with slash commands, and connect a group chat so mentioning the bot triggers a full AI conversation."
+icon: "robot"
+---
+
+## Prerequisites
+
+Before any command works, the user must **link their Telegram account to a Humain account** —
+either from the admin panel (**Account → Linked accounts → Connect**) or by sending `/start` to
+the bot, which replies with a "Connect Telegram Account" link if the account isn't linked yet.
+There is no in-bot signup.
+
+The bot is webhook-only (no long-polling). See [Telegram overview](/telegram/overview) for the
+webhook and environment variable setup.
+
+---
+
+## Selecting an active workspace
+
+A linked user may belong to multiple workspaces. Run `/start` in a **private chat** with the bot
+to see a persistent keyboard of workspace buttons — tapping one sets it as your active workspace
+for the next 30 days. Every other command (`/kiosks`, `/devices`, `/secretary`) operates against
+whichever workspace is currently active.
+
+<Note>
+  If a command replies that no workspace is selected, run `/start` privately first and tap a
+  workspace button.
+</Note>
+
+---
+
+## Command reference
+
+### Private chat only
+
+| Command | Behavior |
+|---|---|
+| `/start` | Lists your workspaces as a keyboard; prints the command menu. If you have no workspaces, tells you to visit the admin panel. |
+| `/account` | Shows your name, email, and workspace list. |
+| `/kiosks` | Lists kiosks in the active workspace as inline buttons. |
+| `/devices` | Lists devices across all kiosks in the active workspace as inline buttons. |
+| `/secretary` | Lists devices in the active workspace to bind to your Telegram Business connection — see [Business connections](/telegram/business). |
+| `/terms` | Link to the terms of service. |
+| `/privacy` | Link to the privacy policy. |
+
+Running any of these in a group replies "Please DM me…" instead of executing.
+
+### Group / supergroup only
+
+| Command | Behavior |
+|---|---|
+| `/connect` | Lists devices in the active workspace; selecting one links this group chat to that device permanently. |
+| `/disconnect` | Removes the group's device link and clears its cached AI session. |
+
+### Works in both contexts
+
+| Command | Behavior |
+|---|---|
+| `/notify` | In a group: toggles per-chat platform event notifications (requires `/connect` first). In a private chat: toggles your personal DM notification preference. |
+
+---
+
+## Connecting a group to a kiosk
+
+<Steps>
+  <Step title="Select a workspace privately">
+    DM the bot and run `/start`, then tap the workspace that owns the kiosk you want to connect.
+  </Step>
+  <Step title="Run /connect in the group">
+    Add the bot to the group (or open an existing chat with it added), then run `/connect`. The
+    bot lists devices in your active workspace as `Device (Kiosk)` buttons.
+  </Step>
+  <Step title="Select a device">
+    Tapping a device writes a permanent chat-to-device link (`telegram_chat_links`). The bot
+    verifies the device belongs to your active workspace before linking.
+  </Step>
+  <Step title="Talk to the AI">
+    @mention the bot or reply to one of its messages in the group. Unrelated messages are
+    ignored — the bot only responds to mentions and replies. If the group isn't connected yet,
+    it replies once asking an admin to run `/connect`.
+  </Step>
+</Steps>
+
+Run `/disconnect` to unlink the chat. This also clears the cached AI session for the group.
+
+---
+
+## How AI replies are generated
+
+Every AI-driven reply — group mentions, Business connections, managed child bots — runs through
+the same function internally, which:
+
+1. **Reuses or opens a session** — the bot caches a kiosk session ID in Redis per conversation
+   scope (per-group, per-business-connection, or per-managed-bot) with a 22-hour TTL, just under
+   Telegram's 24-hour business-reply window. A cache hit reuses the existing kiosk session; a
+   miss opens a new one with `mode: "text"`.
+2. **Loads the kiosk's persona** — falls back to a generic assistant persona if none is set.
+3. **Runs the full turn pipeline** — the exact same 11-step pipeline documented in
+   [Session lifecycle](/concepts/session-lifecycle): retrieval, guardrails, prompt build, LLM,
+   tool loop, output guardrails, history, and usage accounting.
+4. **Converts the response to Telegram HTML** and sends it with `parse_mode: HTML`.
+
+<Warning>
+  Errors during a group AI turn are **swallowed silently** — no error message is sent to the
+  group. This is intentional (a noisy bot in a busy group is worse than a missed reply), but it
+  means you should monitor server logs, not the chat, when debugging a misbehaving group
+  integration.
+</Warning>
+
+---
+
+## Notifications
+
+`/notify` toggles delivery of platform events (e.g. billing, security alerts) to a chat.
+Configurable events are opt-in; account/security alerts are always delivered regardless of the
+toggle. In a group, `/notify` requires the chat to already be connected via `/connect`.

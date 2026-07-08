@@ -1,9 +1,8 @@
 const { useState, useRef, useCallback } = React;
 
-export const ENVS = {
-  sandbox: 'https://sandbox.api.humain.ai',
-  live: 'https://api.humain.ai',
-};
+// There is no separate sandbox host — sandbox vs. live is determined entirely by the
+// credential's prefix (hk_test_ vs hk_live_), not the URL. See /concepts/sandbox-mode.
+export const API_BASE = 'https://api.humain.ai';
 
 export function Label({ children }) {
   return (
@@ -88,10 +87,9 @@ export function Message({ role, text }) {
 
 export default function PlaygroundText() {
   const [credential, setCredential] = useState('');
-  const [env, setEnv] = useState('sandbox');
-  const [mode, setMode] = useState('rest');
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState(null);
+  const [agentUrl, setAgentUrl] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -100,7 +98,7 @@ export default function PlaygroundText() {
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
 
-  const baseUrl = ENVS[env];
+  const baseUrl = API_BASE;
   const headers = {
     'Authorization': `Bearer ${credential}`,
     'Content-Type': 'application/json',
@@ -136,6 +134,8 @@ export default function PlaygroundText() {
 
       if (!res.ok) throw new Error(data.message ?? data.error);
       setSessionId(data.session_id);
+      // agent_url is where every real-time call goes — not necessarily baseUrl.
+      setAgentUrl(data.agent_url || baseUrl);
       setMessages([]);
     } catch (e) {
       setError(e.message);
@@ -148,13 +148,14 @@ export default function PlaygroundText() {
     if (!sessionId) return;
     setLoading(true);
 
-    const url = `${baseUrl}/v1/sessions/${sessionId}/end`;
+    const url = `${agentUrl}/v1/sessions/${sessionId}/end`;
     setRawRequest(`POST ${url}`);
 
     try {
       const res = await fetch(url, { method: 'POST', headers });
       setRawResponse(`HTTP ${res.status}`);
       setSessionId(null);
+      setAgentUrl(null);
       wsRef.current?.close();
       wsRef.current = null;
     } catch (e) {
@@ -162,76 +163,57 @@ export default function PlaygroundText() {
     } finally {
       setLoading(false);
     }
-  }, [sessionId, baseUrl, credential]);
-
-  // ── REST send ─────────────────────────────────────────────────────────────
-
-  const sendRest = useCallback(async (text) => {
-    const url = `${baseUrl}/v1/sessions/${sessionId}/message`;
-    const reqBody = { input: text };
-    setRawRequest(`POST ${url}\n\n${JSON.stringify(reqBody, null, 2)}`);
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(reqBody),
-    });
-    const data = await res.json();
-    setRawResponse(`HTTP ${res.status}\n\n${JSON.stringify(data, null, 2)}`);
-
-    if (!res.ok) throw new Error(data.message ?? data.error);
-    appendMessage('ai', data.response);
-  }, [sessionId, baseUrl, credential]);
+  }, [sessionId, agentUrl, credential]);
 
   // ── WebSocket send ────────────────────────────────────────────────────────
+  // Browsers can't set an Authorization header on a WS handshake, so mint a
+  // single-use ticket first and pass it as ?ticket= instead of the raw token.
 
   const sendWebSocket = useCallback(async (text) => {
-    const wsUrl = baseUrl.replace(/^http/, 'ws');
-    const fullUrl = `${wsUrl}/v1/sessions/${sessionId}/stream?token=${encodeURIComponent(credential)}`;
+    const ticketUrl = `${agentUrl}/v1/sessions/${sessionId}/ws-ticket`;
+    const ticketRes = await fetch(ticketUrl, { method: 'POST', headers });
+    const ticketData = await ticketRes.json();
+    if (!ticketRes.ok) throw new Error(ticketData.message ?? ticketData.error);
 
-    setRawRequest(`WS CONNECT ${fullUrl.replace(/token=.*/, 'token=<redacted>')}\n\nSEND: ${JSON.stringify({ input: text })}`);
+    const wsUrl = agentUrl.replace(/^http/, 'ws');
+    const fullUrl = `${wsUrl}/v1/sessions/${sessionId}/ws?ticket=${encodeURIComponent(ticketData.ticket)}`;
+    const outFrame = { type: 'message', content: text };
+
+    setRawRequest(`POST ${ticketUrl}\n\nWS CONNECT ${wsUrl}/v1/sessions/${sessionId}/ws?ticket=<redacted>\n\nSEND: ${JSON.stringify(outFrame)}`);
 
     await new Promise((resolve, reject) => {
       const ws = new WebSocket(fullUrl);
       wsRef.current = ws;
-      let buffer = '';
 
-      ws.onopen = () => ws.send(JSON.stringify({ input: text }));
+      ws.onopen = () => ws.send(JSON.stringify(outFrame));
 
       ws.onmessage = (e) => {
         const frame = JSON.parse(e.data);
-        if (frame.type === 'chunk') {
-          buffer += frame.content;
-          setMessages(prev => {
-            const last = prev[prev.length - 1];
-            if (last?.role === 'ai-streaming') {
-              return [...prev.slice(0, -1), { ...last, text: buffer }];
-            }
-            return [...prev, { role: 'ai-streaming', text: buffer, id: Date.now() }];
-          });
-          setTimeout(scrollToBottom, 50);
-        }
-        if (frame.type === 'turn_end') {
-          setMessages(prev => {
-            const last = prev[prev.length - 1];
-            if (last?.role === 'ai-streaming') {
-              return [...prev.slice(0, -1), { role: 'ai', text: last.text, id: last.id }];
-            }
-            return prev;
-          });
-          setRawResponse(`WS TURN_END\n\n${JSON.stringify(frame, null, 2)}`);
+
+        if (frame.type === 'response') {
+          appendMessage('ai', frame.content);
+          setRawResponse(`WS RESPONSE\n\n${JSON.stringify(frame, null, 2)}`);
           ws.close();
           resolve();
         }
+        if (frame.type === 'error') {
+          setRawResponse(`WS ERROR\n\n${JSON.stringify(frame, null, 2)}`);
+          ws.close();
+          reject(new Error(frame.message ?? frame.code));
+        }
+        if (frame.type === 'session_expiring') {
+          setError(frame.message);
+        }
       };
 
-      ws.onerror = (e) => reject(new Error('WebSocket error'));
+      ws.onerror = () => reject(new Error('WebSocket error'));
       ws.onclose = (e) => {
-        if (e.code >= 4000) reject(new Error(`Session error: code ${e.code}`));
-        else resolve();
+        // A clean close before we resolved/rejected via a frame means the
+        // server hung up without sending a response — surface that too.
+        if (wsRef.current === ws) reject(new Error(`Connection closed (code ${e.code})`));
       };
     });
-  }, [sessionId, baseUrl, credential]);
+  }, [sessionId, agentUrl, credential]);
 
   // ── Submit handler ────────────────────────────────────────────────────────
 
@@ -246,17 +228,13 @@ export default function PlaygroundText() {
     setLoading(true);
 
     try {
-      if (mode === 'rest') {
-        await sendRest(text);
-      } else {
-        await sendWebSocket(text);
-      }
+      await sendWebSocket(text);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [input, loading, mode, sendRest, sendWebSocket]);
+  }, [input, loading, sendWebSocket]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
@@ -275,7 +253,7 @@ export default function PlaygroundText() {
           <Label>Device credential</Label>
           <input
             type="password"
-            placeholder="hk_live_…"
+            placeholder="hk_live_… or hk_test_…"
             value={credential}
             onChange={e => setCredential(e.target.value)}
             disabled={!!sessionId}
@@ -291,40 +269,6 @@ export default function PlaygroundText() {
               boxSizing: 'border-box',
             }}
           />
-        </div>
-
-        {/* Environment */}
-        <div>
-          <Label>Environment</Label>
-          <div className="hk-mode-toggle">
-            {['sandbox', 'live'].map(e => (
-              <button
-                key={e}
-                className={env === e ? 'active' : ''}
-                onClick={() => !sessionId && setEnv(e)}
-                disabled={!!sessionId}
-              >
-                {e === 'sandbox' ? 'Sandbox' : 'Live'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Mode */}
-        <div>
-          <Label>Transport</Label>
-          <div className="hk-mode-toggle">
-            {['rest', 'websocket'].map(m => (
-              <button
-                key={m}
-                className={mode === m ? 'active' : ''}
-                onClick={() => !sessionId && setMode(m)}
-                disabled={!!sessionId}
-              >
-                {m === 'rest' ? 'REST' : 'WebSocket'}
-              </button>
-            ))}
-          </div>
         </div>
 
         {/* Session control */}

@@ -44,32 +44,41 @@ Gemini Live:     Audio → Gemini Live (audio-in / audio-out) → Audio
 ```mermaid
 sequenceDiagram
   participant B as Device (browser / runtime)
-  participant A as Humain API
+  participant S as Humain API (server)
+  participant AG as Humain API (agent_url)
 
-  B->>A: POST /v1/sessions {"mode":"voice"}
-  A-->>B: 201 {"session_id":"..."}
+  B->>S: POST /v1/sessions {"mode":"voice"}
+  S-->>B: 201 {"session_id":"...","agent_url":"...","ice_servers":[...]}
 
   B->>B: getUserMedia({audio:true})
-  B->>B: new RTCPeerConnection(iceServers)
+  B->>B: new RTCPeerConnection({iceServers: ice_servers ?? [stun default]})
   B->>B: addTrack(audioTrack)
   B->>B: createOffer()
   B->>B: setLocalDescription(offer)
 
-  B->>A: POST /v1/sessions/{sid}/webrtc/offer {"sdp":"..."}
-  A-->>B: 200 {"sdp":"... (answer)"}
+  B->>AG: POST /v1/sessions/{sid}/webrtc/offer {"sdp":"..."}
+  AG-->>B: 200 {"sdp":"... (answer)"} — negotiates a "control" data channel
 
   B->>B: setRemoteDescription(answer)
 
   loop ICE candidates
-    B->>A: POST /v1/sessions/{sid}/webrtc/ice {candidate, sdp_mid, sdp_mline_index}
-    A-->>B: 204
+    B->>AG: POST /v1/sessions/{sid}/webrtc/ice {candidate, sdp_mid, sdp_mline_index}
+    AG-->>B: 204
   end
 
-  Note over B,A: Audio flowing both directions (Opus)
+  Note over B,AG: Audio flowing both directions (Opus)
+  Note over B,AG: control channel: {"type":"session_expiring",...} near time limit
 
-  B->>A: POST /v1/sessions/{sid}/end
-  A-->>B: 204
+  B->>AG: POST /v1/sessions/{sid}/end
+  AG-->>B: 204
 ```
+
+<Note>
+  `agent_url` is the base URL for both WebRTC signalling calls and `end` — it may differ from
+  the host that served `POST /v1/sessions`. `ice_servers` (TURN/STUN credentials) is only present
+  in the response when TURN relay is configured for your workspace; fall back to a public STUN
+  server when it's absent, as shown below.
+</Note>
 
 ## Browser integration
 
@@ -79,18 +88,22 @@ const BASE  = 'https://api.humain.ai';
 
 async function startVoiceSession() {
   // ─── 1. Open a voice session ───────────────────────────────────────────────
-  const { session_id } = await fetch(`${BASE}/v1/sessions`, {
+  const { session_id, agent_url, ice_servers } = await fetch(`${BASE}/v1/sessions`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode: 'voice' }),
   }).then(r => r.json());
 
+  // Every subsequent call (offer, ice, end) goes to agent_url, not BASE.
+
   // ─── 2. Get microphone access ──────────────────────────────────────────────
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
 
   // ─── 3. Create RTCPeerConnection ───────────────────────────────────────────
+  // Use ice_servers from the session-open response when present (TURN configured
+  // for your workspace); otherwise fall back to a public STUN server.
   const pc = new RTCPeerConnection({
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    iceServers: ice_servers?.length ? ice_servers : [{ urls: 'stun:stun.l.google.com:19302' }],
   });
 
   // Add local audio track
@@ -106,26 +119,44 @@ async function startVoiceSession() {
     document.body.appendChild(audio);
   };
 
+  // Negotiated data channel for control events (session_expiring, error).
+  // Must match the server's channel exactly: id 0, negotiated.
+  const controlChannel = pc.createDataChannel('control', { negotiated: true, id: 0 });
+  controlChannel.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'session_expiring') {
+      showWarningBanner(`Session ending in ${msg.seconds_left}s`);
+    }
+    if (msg.type === 'error' && msg.code === 'SESSION_ENDED') {
+      // Server will close the peer connection next — clean up your UI here.
+    }
+  };
+
   // ─── 4. Create SDP offer ──────────────────────────────────────────────────
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
   // ─── 5. Exchange offer/answer with the server ─────────────────────────────
-  const { sdp: answerSDP } = await fetch(
-    `${BASE}/v1/sessions/${session_id}/webrtc/offer`,
+  const offerRes = await fetch(
+    `${agent_url}/v1/sessions/${session_id}/webrtc/offer`,
     {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ sdp: offer.sdp }),
     }
-  ).then(r => r.json());
+  );
+  const offerData = await offerRes.json();
+  if (!offerRes.ok) {
+    // e.g. INVALID_MODE (session isn't voice/voip) or VOICE_NOT_ENABLED (503)
+    throw new Error(`${offerData.error}: ${offerData.message}`);
+  }
 
-  await pc.setRemoteDescription({ type: 'answer', sdp: answerSDP });
+  await pc.setRemoteDescription({ type: 'answer', sdp: offerData.sdp });
 
   // ─── 6. Send ICE candidates ────────────────────────────────────────────────
   pc.onicecandidate = async ({ candidate }) => {
     if (!candidate) return; // null signals end of candidates
-    await fetch(`${BASE}/v1/sessions/${session_id}/webrtc/ice`, {
+    await fetch(`${agent_url}/v1/sessions/${session_id}/webrtc/ice`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -140,7 +171,7 @@ async function startVoiceSession() {
   return async function endSession() {
     stream.getTracks().forEach(t => t.stop());
     pc.close();
-    await fetch(`${BASE}/v1/sessions/${session_id}/end`, {
+    await fetch(`${agent_url}/v1/sessions/${session_id}/end`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${TOKEN}` },
     });
@@ -171,23 +202,21 @@ You do not need to manage push-to-talk. The server detects end-of-utterance serv
 <AccordionGroup>
   <Accordion title="Using TURN servers">
     In NAT-heavy environments (cellular networks, corporate firewalls) STUN alone may not
-    establish a peer connection. Configure a TURN relay:
+    establish a peer connection. If your workspace has TURN configured server-side, the
+    session-open response includes an `ice_servers` array with time-limited credentials — pass
+    it straight to `RTCPeerConnection` as shown in the example above:
 
     ```javascript
+    const { ice_servers } = await openSessionResponse.json();
     const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        {
-          urls: 'turn:turn.example.com:3478',
-          username: 'myuser',
-          credential: 'mypassword',
-        },
-      ],
+      iceServers: ice_servers?.length ? ice_servers : [{ urls: 'stun:stun.l.google.com:19302' }],
     });
     ```
 
-    You can provision a TURN server with [coturn](https://github.com/coturn/coturn) or use a
-    managed service (Twilio, Metered.ca, Cloudflare Calls).
+    TURN relay itself is configured per-deployment on the server side (contact your Humain
+    workspace admin, or see the self-hosted [coturn](https://github.com/coturn/coturn) setup in
+    `kiosk-infra` if you run your own cluster) — clients don't provision or hold long-lived TURN
+    credentials themselves.
   </Accordion>
   <Accordion title="Server-side runtimes (non-browser)">
     For embedded Linux devices or server-side Go/Python code that speaks WebRTC:

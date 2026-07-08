@@ -32,7 +32,6 @@ import { useKioskSession } from "@humain/kiosk-js/vue"
 const { session, status, openSession, closeSession, sendMessage, stream } =
   useKioskSession({
     credential: "hk_live_your_credential_here",
-    mode: "sandbox",
   })
 
 const messages = ref<Array<{ role: string; content: string }>>([])
@@ -94,7 +93,6 @@ import { KioskChat } from "@humain/kiosk-js/vue"
 <template>
   <KioskChat
     credential="hk_live_your_credential_here"
-    mode="sandbox"
     placeholder="Ask me anything…"
     @message="(msg) => console.log('User:', msg)"
     @response="(res) => console.log('AI:', res)"
@@ -112,7 +110,6 @@ import { KioskVoice } from "@humain/kiosk-js/vue"
 <template>
   <KioskVoice
     credential="hk_live_your_credential_here"
-    mode="sandbox"
     @transcript="(text) => console.log('Heard:', text)"
     @response="(text) => console.log('AI:', text)"
   />

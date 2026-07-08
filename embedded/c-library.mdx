@@ -183,8 +183,9 @@ switch (err) {
 ## `kiosk_config_t` fields
 
 <ParamField body="credential" type="const char *" required>
-  Device API credential in the form `hk_live_XXXXXXXXXXXXXXXXXX`. Read from an environment
-  variable — never hard-code in source files.
+  Device API credential in the form `hk_live_XXXXXXXXXXXXXXXXXX` (production) or
+  `hk_test_XXXXXXXXXXXXXXXXXX` (sandbox — see [Sandbox mode](/concepts/sandbox-mode)). Read
+  from an environment variable — never hard-code in source files.
 
   ```c
   cfg.credential = getenv("HUMAIN_CREDENTIAL");
@@ -192,8 +193,9 @@ switch (err) {
 </ParamField>
 
 <ParamField body="base_url" type="const char *" default="https://api.humain.ai">
-  Override the API base URL. Set to `"https://sandbox.api.humain.ai"` during development, or
-  leave as `NULL` to use the production endpoint.
+  Override the API base URL. There is no separate sandbox host — sandbox behavior comes from
+  using an `hk_test_` credential against this same URL. Leave as `NULL` unless you're pointing
+  at a self-hosted deployment.
 </ParamField>
 
 <ParamField body="timeout_ms" type="int" default="30000">
@@ -275,7 +277,7 @@ switch (err) {
 </ParamField>
 
 <ParamField body="sample_rate" type="int" default="16000">
-  Audio sample rate in Hz. Must match your audio hardware. Deepgram STT performs best
+  Audio sample rate in Hz. Must match your audio hardware. Gemini Live performs best
   at 16 000 Hz or 48 000 Hz.
 </ParamField>
 

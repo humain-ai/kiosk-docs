@@ -118,9 +118,12 @@ HumainWidget.init({
     ```http
     Content-Security-Policy:
       script-src 'self' https://cdn.humain.ai;
-      connect-src 'self' https://api.humain.ai https://sandbox.api.humain.ai wss://api.humain.ai;
+      connect-src 'self' https://api.humain.ai wss://api.humain.ai;
       frame-src 'none';
     ```
+
+    There is no separate sandbox host to allow-list — sandbox vs. live is determined by which
+    credential (`hk_test_` vs `hk_live_`) the widget is configured with, not a different URL.
 
     The widget does not use iframes or inline `eval()`. If you use a strict `script-src` policy,
     you may need to add a nonce or hash for the inline `<script>` that calls `HumainWidget.init()`.

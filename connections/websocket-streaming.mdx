@@ -1,233 +1,272 @@
 ---
 title: "WebSocket — streaming"
-description: "Receive AI response tokens as they are generated. Eliminates the waiting spinner and makes your UI feel instant."
+description: "Exchange text conversation turns over a persistent WebSocket connection. The only transport for text mode — there is no REST message endpoint."
 ---
 
-## Why streaming?
+## Why WebSocket?
 
-With the REST endpoint, the device waits for the full AI response before it arrives. With WebSocket
-streaming, the device receives response chunks as they are generated — typically within 300 ms of
-sending input. For a chat interface, this is the difference between a loading spinner and words
-appearing instantly on screen.
+There is no REST endpoint for sending a text message and getting a reply — the WebSocket is the
+only way to exchange conversation turns in text mode. Opening one persistent, authenticated
+connection avoids repeating auth and connection setup on every turn, and lets the server push
+events proactively (like a session-expiry warning) without the client polling for them.
+
+<Note>
+  This is a persistent connection, not token-by-token streaming. Each turn gets exactly one
+  `response` frame containing the AI's complete reply — there is no `chunk` frame or partial-text
+  event. If you want a "typing" or token-reveal effect in your UI, animate the complete response
+  client-side (see [Building a streaming UI](/web/streaming-ui)) rather than expecting the server
+  to send partial tokens.
+</Note>
 
 ## Wire protocol
 
-The WebSocket endpoint is at `GET /v1/sessions/{sid}/stream`. Upgrade to it with any standard
-WebSocket client. Authentication uses the same bearer token — pass it as a query parameter or in
-the `Authorization` header before the upgrade (browser `WebSocket` API does not support custom
-headers; use a query parameter in that case).
+The WebSocket endpoint is `GET {agent_url}/v1/sessions/{sid}/ws` — served on the `agent_url`
+returned by `POST /v1/sessions`, not necessarily the host you called to open the session.
+
+### Authentication
+
+Non-browser clients (native apps, servers, embedded devices) send the same bearer token used to
+open the session, in the `Authorization` header on the upgrade request.
+
+Browsers cannot set custom headers on a WebSocket handshake, so first mint a short-lived,
+single-use ticket:
+
+```bash
+curl -X POST https://api.humain.ai/v1/sessions/$SESSION_ID/ws-ticket \
+  -H "Authorization: Bearer hk_live_your_credential_here"
+# → {"ticket":"wst_...","expires_in":30}
+```
+
+Then pass it as `?ticket=` on the WS URL instead of the raw token:
+
+```
+wss://api.humain.ai/v1/sessions/{sid}/ws?ticket=wst_...
+```
 
 ### Sending a message
 
-Send a UTF-8 JSON text frame:
+Send one UTF-8 JSON text frame per turn:
 
 ```json
-{"input": "What are your opening hours?"}
+{"type": "message", "content": "What are your opening hours?"}
 ```
 
-### Receiving events
-
-The server sends a sequence of typed frames for each AI turn:
+### Receiving a response
 
 ```json
-{"type": "turn_start"}
-{"type": "chunk", "content": "We "}
-{"type": "chunk", "content": "are "}
-{"type": "chunk", "content": "open Monday to Friday, 9 AM–6 PM."}
-{"type": "turn_end", "message_count": 2}
+{"type": "response", "content": "We are open Monday to Friday, 9 AM–6 PM.", "message_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"}
 ```
 
-If the AI calls an action endpoint during the turn, two additional frames appear mid-stream:
+`message_id` is a fresh UUID per response — use it to deduplicate if you retry sending logic on
+your end.
+
+### Session expiry warning
+
+Sent once, 60 seconds (configurable) before the session's hard time limit:
 
 ```json
-{"type": "turn_start"}
-{"type": "tool_call", "name": "fetch_availability", "call_id": "call_abc123"}
-{"type": "tool_result", "call_id": "call_abc123", "status": "ok"}
-{"type": "chunk", "content": "We have slots available on Thursday."}
-{"type": "turn_end", "message_count": 3}
+{"type": "session_expiring", "message": "Your session will expire in 60 seconds."}
 ```
 
-Concatenate `content` fields from all `chunk` frames to reconstruct the full response.
+The session is not closed yet when this arrives — you can still send turns until the actual
+`SESSION_ENDED` error/close.
 
 ### Frame types
 
 <ResponseField name="type" type="string" required>
-  One of `turn_start`, `chunk`, `tool_call`, `tool_result`, or `turn_end`.
+  One of `message` (client → server), `response`, `error`, or `session_expiring` (server → client).
 </ResponseField>
 
 <ResponseField name="content" type="string">
-  Present only when `type` is `chunk`. A fragment of the AI response — append to your output
-  buffer.
+  On a `message` frame, the user's text input. On a `response` frame, the AI's complete reply.
 </ResponseField>
 
-<ResponseField name="name" type="string">
-  Present only when `type` is `tool_call`. The name of the action endpoint that was invoked.
+<ResponseField name="message_id" type="string">
+  Present only on `response` frames. A fresh UUID per response, for client-side deduplication.
 </ResponseField>
 
-<ResponseField name="call_id" type="string">
-  Present on `tool_call` and `tool_result` frames. Links the result back to its originating call.
+<ResponseField name="code" type="string">
+  Present only on `error` frames. One of `TURN_ERROR`, `SESSION_ENDED`, or `SERVICE_UNAVAILABLE`
+  — see [Error frames](#error-frames) below.
 </ResponseField>
 
-<ResponseField name="status" type="string">
-  Present only when `type` is `tool_result`. Either `"ok"` or `"error"`.
-</ResponseField>
-
-<ResponseField name="message_count" type="integer">
-  Present only when `type` is `turn_end`. Total number of messages in the session after this turn.
+<ResponseField name="message" type="string">
+  On `error` frames, a human-readable description — for `TURN_ERROR`, this string is prefixed
+  with the real machine-readable reason (e.g. `"INPUT_REJECTED: Contains a blocked phrase."`).
+  On `session_expiring`, a display-ready warning string.
 </ResponseField>
 
 ### Error frames
 
-If the guardrail rejects input or a provider error occurs, the server sends a close frame with a
-`4xxx` WebSocket close code followed by a JSON reason string:
+Errors during a turn arrive as a **JSON frame on the same open connection** — the WebSocket is
+not closed with a 4xxx code the way some APIs do it.
 
-| Close code | Reason |
+```json
+{"type": "error", "code": "TURN_ERROR", "message": "INPUT_REJECTED: Contains a blocked phrase."}
+```
+
+`code` is one of:
+
+| Code | Meaning |
 |---|---|
-| `4400` | `INPUT_REJECTED` — input blocked by a guardrail rule |
-| `4403` | `CREDENTIAL_BLOCKED` or `KIOSK_INACTIVE` |
-| `4429` | `RATE_LIMITED` — slow down |
-| `4503` | `PROVIDER_ERROR` — LLM unavailable, retry |
+| `TURN_ERROR` | Any pipeline failure — guardrail rejection, FraudGuard block, rate limit, or provider error. The real reason is the `SCREAMING_SNAKE_CASE` prefix of `message`, before the first `: `. |
+| `SESSION_ENDED` | The session's time limit was reached. The connection is closed after this frame — open a new session to continue. |
+| `SERVICE_UNAVAILABLE` | The server's turn pipeline is not configured (misconfiguration, not a per-request failure). |
+
+To get the specific guardrail/FraudGuard reason out of a `TURN_ERROR`, split `message` on the
+first `": "`:
+
+```javascript
+const [reasonCode, ...rest] = frame.message.split(': ');
+// reasonCode: "INPUT_REJECTED" | "RATE_LIMITED" | "CREDENTIAL_BLOCKED" | "PROVIDER_ERROR" | ...
+```
 
 ## Browser integration
 
 <CodeGroup>
 ```javascript JavaScript (browser)
-const BASE_URL = 'wss://api.humain.ai'; // wss:// for production, ws:// for local
+const BASE_URL = 'https://api.humain.ai';
 const token = 'hk_live_your_credential_here';
 
-// 1. Open a session first (HTTP POST)
-const { session_id } = await fetch(`https://api.humain.ai/v1/sessions`, {
+// 1. Open a session (HTTP POST) — capture agent_url
+const { session_id, agent_url } = await fetch(`${BASE_URL}/v1/sessions`, {
   method: 'POST',
   headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
   body: JSON.stringify({ mode: 'text' }),
 }).then(r => r.json());
 
-// 2. Upgrade to WebSocket (token in query param — browsers can't set WS headers)
-const ws = new WebSocket(
-  `${BASE_URL}/v1/sessions/${session_id}/stream?token=${encodeURIComponent(token)}`
-);
+// 2. Mint a single-use WS ticket — browsers can't set headers on the WS handshake
+const { ticket } = await fetch(`${agent_url}/v1/sessions/${session_id}/ws-ticket`, {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${token}` },
+}).then(r => r.json());
 
-let fullResponse = '';
+// 3. Upgrade to WebSocket, on agent_url, with the ticket
+const wsUrl = agent_url.replace(/^http/, 'ws');
+const ws = new WebSocket(`${wsUrl}/v1/sessions/${session_id}/ws?ticket=${ticket}`);
 
 ws.onopen = () => {
-  // 3. Send user input
-  ws.send(JSON.stringify({ input: 'What are your opening hours?' }));
+  ws.send(JSON.stringify({ type: 'message', content: 'What are your opening hours?' }));
 };
 
 ws.onmessage = (event) => {
   const frame = JSON.parse(event.data);
 
-  if (frame.type === 'chunk') {
-    fullResponse += frame.content;
-    updateChatUI(fullResponse); // Append token to the visible text
+  if (frame.type === 'response') {
+    updateChatUI(frame.content); // Full reply — ready to display immediately
   }
 
-  if (frame.type === 'turn_end') {
-    console.log('Turn complete. Messages in session:', frame.message_count);
-    // Ready for next user input
+  if (frame.type === 'error') {
+    console.error('Turn error:', frame.code, frame.message);
+    if (frame.code === 'SESSION_ENDED') {
+      // Connection will close — open a new session to continue
+    }
   }
-};
 
-ws.onclose = (event) => {
-  if (event.code >= 4000) {
-    const reason = JSON.parse(event.reason ?? '{}');
-    console.error('Session error:', reason);
+  if (frame.type === 'session_expiring') {
+    showWarningBanner(frame.message);
   }
 };
 ```
 
 ```javascript Node.js (ws library)
 import WebSocket from 'ws';
-import fetch from 'node-fetch';
 
 const TOKEN = process.env.HUMAIN_TOKEN;
 const BASE = 'https://api.humain.ai';
 
 // 1. Open session
-const { session_id } = await fetch(`${BASE}/v1/sessions`, {
+const { session_id, agent_url } = await fetch(`${BASE}/v1/sessions`, {
   method: 'POST',
   headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
   body: JSON.stringify({ mode: 'text' }),
 }).then(r => r.json());
 
-// 2. Connect WebSocket (Node can use custom headers)
-const ws = new WebSocket(`wss://api.humain.ai/v1/sessions/${session_id}/stream`, {
+// 2. Connect directly with the Bearer header — Node isn't limited like a browser
+const wsUrl = agent_url.replace(/^http/, 'ws');
+const ws = new WebSocket(`${wsUrl}/v1/sessions/${session_id}/ws`, {
   headers: { 'Authorization': `Bearer ${TOKEN}` },
 });
 
 ws.on('open', () => {
-  ws.send(JSON.stringify({ input: process.argv[2] ?? 'Hello!' }));
+  ws.send(JSON.stringify({ type: 'message', content: process.argv[2] ?? 'Hello!' }));
 });
 
-let output = '';
 ws.on('message', (data) => {
   const frame = JSON.parse(data.toString());
-  if (frame.type === 'chunk') {
-    process.stdout.write(frame.content); // Stream to terminal
-    output += frame.content;
-  }
-  if (frame.type === 'turn_end') {
-    console.log('\n\nDone. Messages in session:', frame.message_count);
+  if (frame.type === 'response') {
+    console.log(frame.content);
     ws.close();
   }
-});
-
-ws.on('close', (code, reason) => {
-  if (code >= 4000) console.error('Error close:', code, reason.toString());
+  if (frame.type === 'error') {
+    console.error('Error:', frame.code, frame.message);
+    ws.close();
+  }
 });
 ```
 </CodeGroup>
 
 ## Reconnection strategy
 
-WebSocket connections can drop due to network interruptions. Implement automatic reconnection with
-exponential back-off:
+The session is **not** ended when the connection drops — the same session can be reconnected
+to (potentially served by a different agent process). WebSocket connections can drop due to
+network interruptions; implement reconnection with exponential back-off:
 
 ```javascript
 class HumainStream {
   #token;
   #sessionId;
+  #agentUrl;
   #ws = null;
   #reconnectDelay = 1000;
   #maxDelay = 30000;
 
-  constructor(token, sessionId) {
+  constructor(token, sessionId, agentUrl) {
     this.#token = token;
     this.#sessionId = sessionId;
+    this.#agentUrl = agentUrl;
   }
 
-  connect() {
-    this.#ws = new WebSocket(
-      `wss://api.humain.ai/v1/sessions/${this.#sessionId}/stream`
-        + `?token=${encodeURIComponent(this.#token)}`
-    );
+  async connect() {
+    // Browsers need a fresh ticket every time — tickets are single-use.
+    const { ticket } = await fetch(
+      `${this.#agentUrl}/v1/sessions/${this.#sessionId}/ws-ticket`,
+      { method: 'POST', headers: { 'Authorization': `Bearer ${this.#token}` } }
+    ).then(r => r.json());
+
+    const wsUrl = this.#agentUrl.replace(/^http/, 'ws');
+    this.#ws = new WebSocket(`${wsUrl}/v1/sessions/${this.#sessionId}/ws?ticket=${ticket}`);
 
     this.#ws.onopen = () => {
       this.#reconnectDelay = 1000; // Reset on successful connect
       this.onopen?.();
     };
 
-    this.#ws.onmessage = (e) => this.onmessage?.(JSON.parse(e.data));
-
-    this.#ws.onclose = (e) => {
-      if (e.code < 4000) {
-        // Normal close or network drop — reconnect
-        setTimeout(() => this.connect(), this.#reconnectDelay);
-        this.#reconnectDelay = Math.min(this.#reconnectDelay * 2, this.#maxDelay);
-      } else {
-        // Application-level error (4xxx) — don't reconnect
-        this.onerror?.(e);
+    this.#ws.onmessage = (e) => {
+      const frame = JSON.parse(e.data);
+      if (frame.type === 'error' && frame.code === 'SESSION_ENDED') {
+        this.onended?.(frame); // Don't reconnect — session is gone
+        return;
       }
+      this.onmessage?.(frame);
+    };
+
+    this.#ws.onclose = () => {
+      // Any close other than an explicit SESSION_ENDED frame is treated as
+      // a transient network drop — reconnect with back-off.
+      setTimeout(() => this.connect(), this.#reconnectDelay);
+      this.#reconnectDelay = Math.min(this.#reconnectDelay * 2, this.#maxDelay);
     };
   }
 
-  send(input) {
-    this.#ws?.send(JSON.stringify({ input }));
+  send(content) {
+    this.#ws?.send(JSON.stringify({ type: 'message', content }));
   }
 }
 ```
 
 <Note>
-  When reconnecting mid-session, the server still has the conversation history — you do not need
-  to resend previous messages. Send the next user input directly.
+  When reconnecting mid-session, the server still has the conversation history in its own store —
+  you do not need to resend previous turns. Send the next user input directly once the new
+  connection is open.
 </Note>

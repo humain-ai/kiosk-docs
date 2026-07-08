@@ -33,17 +33,20 @@ You can still exercise the VoIP session lifecycle from the command line — only
 requires telephony hardware:
 
 ```bash
-# 1. Open a VoIP session
-SESSION=$(curl -s -X POST https://sandbox.api.humain.ai/v1/sessions \
-  -H "Authorization: Bearer hk_live_your_credential_here" \
+# 1. Open a VoIP session — use an hk_test_ credential to avoid billing (see /concepts/sandbox-mode)
+RESPONSE=$(curl -s -X POST https://api.humain.ai/v1/sessions \
+  -H "Authorization: Bearer hk_test_your_credential_here" \
   -H "Content-Type: application/json" \
-  -d '{"mode":"voip"}' | jq -r .session_id)
+  -d '{"mode":"voip"}')
+
+SESSION=$(echo "$RESPONSE" | jq -r .session_id)
+AGENT_URL=$(echo "$RESPONSE" | jq -r .agent_url)
 
 echo "Session ID: $SESSION"
 
-# 2. End the session (simulating a hang-up)
-curl -s -X POST "https://sandbox.api.humain.ai/v1/sessions/$SESSION/end" \
-  -H "Authorization: Bearer hk_live_your_credential_here"
+# 2. End the session (simulating a hang-up) — on agent_url, not necessarily the same host
+curl -s -X POST "$AGENT_URL/v1/sessions/$SESSION/end" \
+  -H "Authorization: Bearer hk_test_your_credential_here"
 
 echo "Session closed."
 ```

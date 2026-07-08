@@ -1,102 +1,99 @@
 ---
 title: "Sandbox"
-description: "Test your integration against a realistic API without consuming LLM credits or generating billing events."
+description: "Test your integration without consuming LLM credits or generating billing events — using a dedicated sandbox credential, not a different URL."
 ---
 
 import CredentialWarning from '/snippets/credential-warning.mdx';
 
 ## What is the sandbox?
 
-The sandbox is a parallel environment that mirrors the production API surface exactly. Requests go
-through the same pipeline — authentication, guardrails, session management — but LLM calls are
-replaced with deterministic stub responses. No credits are consumed and no usage is billed.
-
-<Tip>
-  Use the sandbox for all development and CI/CD testing. Switch to production only when you are
-  ready to go live.
-</Tip>
-
-## Base URLs
-
-<CodeGroup>
-```text Production
-https://api.humain.ai
-```
-
-```text Sandbox
-https://sandbox.api.humain.ai
-```
-</CodeGroup>
-
-The only difference is the base URL. All endpoint paths, request shapes, and response shapes are
-identical.
-
-## Credentials
-
-Your device credentials (`hk_live_…`) work against both environments. The environment is determined
-solely by the base URL you call — not the token.
-
-<CredentialWarning />
+Sandbox is a property of the **credential**, not a different environment or base URL. Every
+credential is issued as either `hk_live_…` (production) or `hk_test_…` (sandbox); both work
+against the exact same `https://api.humain.ai` host and the exact same endpoints.
 
 <Warning>
-  There is no separate sandbox token. The same credential works on both URLs. Be careful not to
-  accidentally point a production device at the sandbox base URL.
+  There is no separate sandbox base URL. If you've seen `sandbox.api.humain.ai` referenced
+  elsewhere, that's stale — always call `https://api.humain.ai` and control sandbox behavior
+  by which credential you use.
 </Warning>
 
-## Stub AI responses
+Authentication-level checks run identically for both credential types — an inactive kiosk or a
+FraudGuard-blocked credential is rejected the same way whether the token is `hk_live_` or
+`hk_test_`. What differs is what happens *inside* a session opened with a sandbox credential.
+
+## Issuing a sandbox credential
+
+In the admin panel, when you issue a new credential under **Kiosk → Credentials**, choose
+**Sandbox** instead of **Live**. This mints an `hk_test_…` token rather than `hk_live_…` —
+everything else about the issuance flow is identical.
+
+## What happens in a sandbox session
+
+<Tip>
+  Sandbox sessions skip the turn pipeline entirely for the conversational content — there is no
+  LLM call, and critically, **no per-turn guardrail or FraudGuard check runs either**, since
+  those checks live inside the same pipeline step that's being skipped. Don't rely on the
+  sandbox to validate your guardrail configuration.
+</Tip>
 
 ### Text sessions
 
-In sandbox mode the LLM is replaced with a stub that returns a short, predictable response:
+A sandbox text session **echoes your message back verbatim** over the WebSocket — no LLM call,
+no guardrail pipeline, no usage event:
 
 ```json
-{
-  "response": "[Sandbox] I received your message. This is a test response.",
-  "actions_called": []
-}
-```
+// You send:
+{"type": "message", "content": "What are your opening hours?"}
 
-Guardrail rules and FraudGuard run normally — a blocked phrase will still return `INPUT_REJECTED`
-in the sandbox. This lets you test your error-handling paths without needing a real LLM.
+// You receive:
+{"type": "response", "content": "What are your opening hours?", "message_id": "..."}
+```
 
 ### Voice sessions
 
-Voice sessions in sandbox mode still run the full WebRTC pipeline — ICE negotiation, DTLS
-handshake, and Opus audio transport all function normally. Instead of live STT, LLM, and TTS,
-the server responds with a short pre-recorded audio clip:
+A sandbox voice session still runs the full WebRTC pipeline — ICE negotiation, DTLS handshake,
+and Opus audio transport all function normally, including the `control` data channel. Instead of
+reaching Gemini Live, the server runs a **record → beep → echo** loop: it plays a short tone,
+records your speech, and plays it back to you.
 
-> *"[Sandbox] This is a test response from the Humain voice sandbox."*
-
-This allows you to verify your WebRTC signalling, audio routing, and `VoiceStatus` state
-machine without consuming any AI credits.
+This lets you verify your WebRTC signalling, audio routing, and `VoiceStatus` state machine
+without consuming any AI credits.
 
 ## What is and isn't simulated
 
-| Behaviour | Sandbox | Production |
+| Behaviour | Sandbox (`hk_test_`) | Production (`hk_live_`) |
 |---|---|---|
-| Authentication (bearer token check) | ✅ Real | ✅ Real |
+| Bearer token / credential validation | ✅ Real | ✅ Real |
+| Kiosk active / FraudGuard credential block check | ✅ Real | ✅ Real |
 | Session open / close | ✅ Real | ✅ Real |
-| Guardrail and FraudGuard checks | ✅ Real | ✅ Real |
-| Rate limiting | ✅ Real | ✅ Real |
-| LLM inference | 🔄 Stub | ✅ Real |
-| STT transcription (voice) | 🔄 Stub | ✅ Real |
-| TTS synthesis (voice) | 🔄 Stub | ✅ Real |
+| WebRTC signalling (voice) | ✅ Real | ✅ Real |
+| Per-turn guardrail rules (blocked phrases, PII) | ❌ Skipped | ✅ Real |
+| Per-turn FraudGuard checks | ❌ Skipped | ✅ Real |
+| LLM inference | ❌ Skipped — echoes input | ✅ Real |
+| Gemini Live (voice) | ❌ Skipped — record/beep/echo | ✅ Real |
+| Knowledge base retrieval | ❌ Skipped | ✅ Real |
 | Usage billing | ❌ Not billed | ✅ Billed |
-| Knowledge base retrieval | ✅ Real | ✅ Real |
 
-## Switching environments in code
+<Note>
+  Because guardrails don't run against the echoed content, you cannot use the sandbox to test
+  whether a specific input would be blocked. To test guardrail behavior, use a live credential
+  in a low-traffic testing kiosk instead.
+</Note>
 
-Centralise the base URL in one place so switching environments is a one-line change.
+## Switching credentials in code
+
+Centralise the credential in one place so switching between sandbox and production is a
+one-line change — the base URL never changes.
 
 <CodeGroup>
 ```javascript JavaScript
-const BASE_URL = process.env.NODE_ENV === 'production'
-  ? 'https://api.humain.ai'
-  : 'https://sandbox.api.humain.ai';
+const CREDENTIAL = process.env.NODE_ENV === 'production'
+  ? process.env.HUMAIN_LIVE_CREDENTIAL   // hk_live_...
+  : process.env.HUMAIN_SANDBOX_CREDENTIAL; // hk_test_...
 
-const response = await fetch(`${BASE_URL}/v1/sessions`, {
+const response = await fetch('https://api.humain.ai/v1/sessions', {
   method: 'POST',
-  headers: { 'Authorization': `Bearer ${process.env.HUMAIN_TOKEN}` },
+  headers: { 'Authorization': `Bearer ${CREDENTIAL}` },
   body: JSON.stringify({ mode: 'text' }),
 });
 ```
@@ -104,17 +101,19 @@ const response = await fetch(`${BASE_URL}/v1/sessions`, {
 ```python Python
 import os
 
-BASE_URL = (
-    "https://api.humain.ai"
+credential = (
+    os.environ["HUMAIN_LIVE_CREDENTIAL"]
     if os.environ.get("ENV") == "production"
-    else "https://sandbox.api.humain.ai"
+    else os.environ["HUMAIN_SANDBOX_CREDENTIAL"]
 )
 ```
 
 ```go Go
-baseURL := "https://sandbox.api.humain.ai"
+credential := os.Getenv("HUMAIN_SANDBOX_CREDENTIAL")
 if os.Getenv("ENV") == "production" {
-    baseURL = "https://api.humain.ai"
+    credential = os.Getenv("HUMAIN_LIVE_CREDENTIAL")
 }
 ```
 </CodeGroup>
+
+<CredentialWarning />

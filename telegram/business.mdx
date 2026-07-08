@@ -1,0 +1,96 @@
+---
+title: "Business connections"
+description: "Bind a kiosk to your personal Telegram account via Business Mode so the AI answers your customer chats automatically."
+icon: "briefcase"
+---
+
+## What this is for
+
+Telegram Business lets a personal account add a chatbot that can read and reply to the account's
+DMs on the owner's behalf. Humain uses this so a business owner's personal Telegram account can
+auto-answer customers with a kiosk's persona, knowledge base, and guardrails — without a
+separate business number or a group chat.
+
+This is different from [group AI](/telegram/bot#connecting-a-group-to-a-kiosk): a Business
+connection operates on the owner's **own DMs**, not a group the bot is added to.
+
+---
+
+## Two independent pieces of configuration
+
+A Business connection has two parts that are configured separately and stored in the same
+database row, keyed by the owner's Telegram user ID:
+
+<Steps>
+  <Step title="Bind a kiosk (in the bot, /secretary)">
+    DM the bot privately and run `/secretary`. The bot lists devices in your active workspace —
+    selecting one records the workspace, kiosk, and device to use, but leaves replies **disabled**
+    until step 2 is also done.
+  </Step>
+  <Step title="Enable Telegram Business (in Telegram settings, not the bot)">
+    In the Telegram app: **Settings → Telegram Business → Chatbots**, select this bot, and grant
+    it permission to reply to messages. Telegram then sends the bot a `business_connection`
+    event recording the connection ID and reply permission.
+  </Step>
+</Steps>
+
+<Tip>
+  These two steps are independent by design — reconnecting Telegram Business (step 2) never
+  loses your `/secretary` kiosk binding (step 1), and re-running `/secretary` never disables an
+  active Business connection.
+</Tip>
+
+Both steps must be complete — kiosk bound **and** Business Mode enabled with reply permission —
+before the AI will respond to anything.
+
+---
+
+## Message handling
+
+<Warning>
+  If the connection is only partially configured, incoming Business messages are **dropped
+  silently** — no error, no hint is sent anywhere. If your secretary isn't replying, re-check
+  both halves of the setup above rather than waiting for an error message.
+</Warning>
+
+When a fully-configured Business message arrives:
+
+- **Messages from your own account** are ignored **unless you explicitly @mention the bot** —
+  this lets you test the secretary in your own chats without every message you send triggering
+  a reply.
+- **Messages from your customers** (anyone else in the conversation) are always answered.
+- The AI turn runs through the same pipeline as every other channel — retrieval, guardrails,
+  persona, tool calls — scoped to that specific business connection and chat.
+- The reply is sent **on behalf of the business account** (using Telegram's
+  `business_connection_id` parameter on `sendMessage`), so customers see it as coming from you,
+  not from a separate bot identity.
+
+---
+
+## Managed (child) bots
+
+Separately from Business connections, Telegram can grant the Humain bot management rights over
+a **child bot** (a `managed_bot` update). When that happens, Humain:
+
+1. Encrypts and stores the child bot's token (AES-256-GCM, `ENCRYPTION_KEY`).
+2. Generates a per-bot webhook secret and registers a dedicated webhook for the child bot.
+3. Routes the child bot's own updates through the same AI turn pipeline once a workspace is
+   bound to it.
+
+<Note>
+  A newly granted managed bot has **no workspace bound automatically** — Telegram's
+  `managed_bot` update doesn't include an owner or workspace. Until a workspace binding is wired
+  up for it, the child bot tells users to have the owner run `/secretary`. Contact your workspace
+  admin if you expect a managed bot to already be answering and it isn't.
+</Note>
+
+---
+
+## What you're configuring, in plain terms
+
+| You do this | Where |
+|---|---|
+| Link your Telegram account to Humain | Admin panel or bot `/start` |
+| Bind a kiosk to your account | Bot, private chat, `/secretary` |
+| Turn on Business Mode and grant reply permission | Telegram app → Settings → Business → Chatbots |
+| Test it | @mention the bot in a chat with yourself, or have a real customer message you |

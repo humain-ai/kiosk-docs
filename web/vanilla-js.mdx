@@ -64,7 +64,7 @@ import { HumainKioskClient } from "@humain/kiosk-js"
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
-const kiosk   = new HumainKioskClient({ credential: "hk_live_your_credential_here", mode: "sandbox" })
+const kiosk   = new HumainKioskClient({ credential: "hk_live_your_credential_here" })
 const session = await kiosk.openSession()
 
 const $messages = document.getElementById("messages")

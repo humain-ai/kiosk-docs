@@ -1,0 +1,85 @@
+---
+title: "Stars payments"
+description: "Sell plan subscriptions and pay-as-you-go credit bundles through Telegram Stars — no external payment provider required."
+icon: "star"
+---
+
+## Overview
+
+Telegram Stars (currency code `XTR`) is Telegram's in-app payment system. Humain uses it to sell
+two kinds of purchases directly inside Telegram, with no separate checkout page:
+
+- **Subscription** — a recurring monthly plan (`subscription_period` of 2,592,000 seconds / 30
+  days).
+- **PAYG (pay-as-you-go)** — a one-off credit bundle that adds extra session capacity.
+
+A plain **product** purchase kind also exists but is only recorded for reference — it isn't
+wired into workspace billing the way `subscription` and `payg` are.
+
+---
+
+## Where the invoice is created
+
+Invoice creation happens in the **Mini App / `cmd/server`**, not in the bot itself:
+
+1. The Mini App's `/c/pay` compact view (opened via a bot deep link) collects the plan or bundle
+   choice and POSTs `{ workspace_id, plan_id | bundle_id }` to
+   `/api/v1/telegram/stars/invoice`.
+2. `cmd/server` verifies the caller's workspace membership, calls Telegram's
+   `createInvoiceLink` API, and returns the resulting `invoice_link`.
+3. The Mini App calls `window.Telegram.WebApp.openInvoice(invoice_link, callback)`, which opens
+   Telegram's native payment sheet.
+
+The invoice payload is JSON (kept under Telegram's 128-byte limit) containing `user_id`,
+`plan_id` or `bundle_id`, `workspace_id`, and `kind` (`subscription`, `product`, or `payg`).
+
+---
+
+## Where the payment is fulfilled
+
+Fulfillment happens in the **bot** (`cmd/telegram`), which is the process that receives
+Telegram's payment webhooks:
+
+<Steps>
+  <Step title="Pre-checkout">
+    Telegram sends a pre-checkout query before charging the user. The bot must answer within 10
+    seconds — it decodes the invoice payload, verifies `payload.user_id` matches the paying
+    user, and accepts.
+  </Step>
+  <Step title="Successful payment">
+    On success, Telegram sends a `successful_payment` update. The bot:
+    - Writes a row to `telegram_subscriptions`, keyed on `charge_id` (unique) so a duplicate
+      webhook delivery is a no-op (`ON CONFLICT charge_id DO NOTHING`).
+    - For `subscription` and `payg` kinds, calls into billing to assign the plan or add PAYG
+      session credit (`extra_seconds`) to the workspace.
+  </Step>
+</Steps>
+
+Fulfillment is idempotent on `charge_id` — Telegram's at-least-once delivery for payment updates
+cannot double-charge or double-fulfill a purchase.
+
+---
+
+## Data model
+
+`telegram_subscriptions` stores every Stars purchase:
+
+| Column | Meaning |
+|---|---|
+| `telegram_user_id` | The paying Telegram user. |
+| `user_id` | The linked Humain user. |
+| `plan_id` | Which plan or bundle was purchased. |
+| `charge_id` | Telegram's unique charge identifier — the idempotency key. |
+| `currency` | Always `XTR`. |
+| `amount` | Stars amount charged. |
+| `subscription_period` | Seconds for a recurring plan; `null` for a one-off purchase. |
+| `status` | `active`, `cancelled`, or `expired`. |
+| `current_period_end` | When a recurring plan's current period ends. |
+
+---
+
+## Testing
+
+Use an `hk_test_` sandbox-linked workspace where possible, but note **Stars payments always use
+real Telegram Stars** — there is no sandbox currency for Stars purchases. Test with a small
+Stars balance and Telegram's own refund tools if you need to reverse a test transaction.

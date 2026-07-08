@@ -1,9 +1,8 @@
 const { useState, useRef, useCallback, useEffect } = React;
 
-export const ENVS = {
-  sandbox: 'https://sandbox.api.humain.ai',
-  live: 'https://api.humain.ai',
-};
+// There is no separate sandbox host — sandbox vs. live is determined entirely by the
+// credential's prefix (hk_test_ vs hk_live_), not the URL. See /concepts/sandbox-mode.
+export const API_BASE = 'https://api.humain.ai';
 
 export const STATUSES = {
   idle:        { label: 'Idle',        dot: '',           color: '#9ca3af' },
@@ -48,9 +47,9 @@ export function StatusBar({ status, sessionId }) {
 
 export default function PlaygroundVoice() {
   const [credential, setCredential] = useState('');
-  const [env, setEnv] = useState('sandbox');
   const [status, setStatus] = useState('idle');
   const [sessionId, setSessionId] = useState(null);
+  const [agentUrl, setAgentUrl] = useState(null);
   const [transcript, setTranscript] = useState([]);
   const [error, setError] = useState(null);
   const [micAllowed, setMicAllowed] = useState(null); // null = unknown, true/false
@@ -60,7 +59,6 @@ export default function PlaygroundVoice() {
   const audioElRef = useRef(null);
   const transcriptEndRef = useRef(null);
 
-  const baseUrl = ENVS[env];
   const headers = { 'Authorization': `Bearer ${credential}`, 'Content-Type': 'application/json' };
 
   const appendTranscript = (role, text) => {
@@ -88,7 +86,7 @@ export default function PlaygroundVoice() {
 
     try {
       // 1. Open session
-      const res = await fetch(`${baseUrl}/v1/sessions`, {
+      const res = await fetch(`${API_BASE}/v1/sessions`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ mode: 'voice' }),
@@ -96,7 +94,10 @@ export default function PlaygroundVoice() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? data.error);
       const sid = data.session_id;
+      // Every subsequent call (offer, ice, end) goes to agent_url, not API_BASE.
+      const agentBase = data.agent_url || API_BASE;
       setSessionId(sid);
+      setAgentUrl(agentBase);
       appendTranscript('system', `Session opened: ${sid}`);
 
       // 2. Get mic
@@ -104,9 +105,10 @@ export default function PlaygroundVoice() {
       streamRef.current = stream;
       setMicAllowed(true);
 
-      // 3. Create RTCPeerConnection
+      // 3. Create RTCPeerConnection — use ice_servers from the open response when present
+      // (TURN configured for the workspace), otherwise fall back to public STUN.
       const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        iceServers: data.ice_servers?.length ? data.ice_servers : [{ urls: 'stun:stun.l.google.com:19302' }],
       });
       pcRef.current = pc;
 
@@ -145,20 +147,21 @@ export default function PlaygroundVoice() {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // 5. Exchange offer/answer
-      const offerRes = await fetch(`${baseUrl}/v1/sessions/${sid}/webrtc/offer`, {
+      // 5. Exchange offer/answer (on agent_url)
+      const offerRes = await fetch(`${agentBase}/v1/sessions/${sid}/webrtc/offer`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ sdp: offer.sdp }),
       });
-      const { sdp: answerSDP } = await offerRes.json();
-      await pc.setRemoteDescription({ type: 'answer', sdp: answerSDP });
+      const offerData = await offerRes.json();
+      if (!offerRes.ok) throw new Error(`${offerData.error}: ${offerData.message}`);
+      await pc.setRemoteDescription({ type: 'answer', sdp: offerData.sdp });
       appendTranscript('system', 'WebRTC negotiation complete. Speak into your microphone.');
 
-      // 6. Send ICE candidates
+      // 6. Send ICE candidates (on agent_url)
       pc.onicecandidate = async ({ candidate }) => {
         if (!candidate) return;
-        await fetch(`${baseUrl}/v1/sessions/${sid}/webrtc/ice`, {
+        await fetch(`${agentBase}/v1/sessions/${sid}/webrtc/ice`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
@@ -174,14 +177,14 @@ export default function PlaygroundVoice() {
       setStatus('error');
       cleanup(false);
     }
-  }, [credential, baseUrl]);
+  }, [credential]);
 
   // ── Stop session ─────────────────────────────────────────────────────────
 
   const cleanup = useCallback(async (callEnd = true) => {
-    if (callEnd && sessionId) {
+    if (callEnd && sessionId && agentUrl) {
       try {
-        await fetch(`${baseUrl}/v1/sessions/${sessionId}/end`, {
+        await fetch(`${agentUrl}/v1/sessions/${sessionId}/end`, {
           method: 'POST',
           headers,
         });
@@ -201,9 +204,10 @@ export default function PlaygroundVoice() {
     }
 
     setSessionId(null);
+    setAgentUrl(null);
     setStatus('idle');
     appendTranscript('system', 'Session ended.');
-  }, [sessionId, baseUrl, credential]);
+  }, [sessionId, agentUrl, credential]);
 
   // ── Cleanup on unmount ────────────────────────────────────────────────────
 
@@ -225,7 +229,7 @@ export default function PlaygroundVoice() {
           <Label>Device credential</Label>
           <input
             type="password"
-            placeholder="hk_live_…"
+            placeholder="hk_live_… or hk_test_…"
             value={credential}
             onChange={e => setCredential(e.target.value)}
             disabled={isActive}
@@ -241,21 +245,6 @@ export default function PlaygroundVoice() {
               boxSizing: 'border-box',
             }}
           />
-        </div>
-        <div>
-          <Label>Environment</Label>
-          <div className="hk-mode-toggle">
-            {['sandbox', 'live'].map(e => (
-              <button
-                key={e}
-                className={env === e ? 'active' : ''}
-                onClick={() => !isActive && setEnv(e)}
-                disabled={isActive}
-              >
-                {e === 'sandbox' ? 'Sandbox' : 'Live'}
-              </button>
-            ))}
-          </div>
         </div>
       </div>
 

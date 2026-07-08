@@ -23,9 +23,10 @@ The server:
 1. Receives the raw audio stream
 2. Detects when the user starts speaking
 3. Detects end-of-utterance after **600 ms of silence**
-4. Sends the accumulated audio to Deepgram STT
-5. Sends the transcript to the LLM
-6. Streams TTS audio back to the device
+4. Streams the accumulated audio to **Gemini Live** — a single audio-in/audio-out model that
+   handles speech understanding, inference, and voice synthesis natively, with no separate STT
+   or TTS step
+5. Streams the AI's audio response back to the device
 
 Your app does not need to know about any of these stages — the SDK abstracts them via the
 `VoiceStatus` / `VoiceStatus` enum and the delegate/listener callbacks.
@@ -40,9 +41,9 @@ Your app does not need to know about any of these stages — the SDK abstracts t
 ## Barge-in
 
 Barge-in allows the user to interrupt the AI while it is speaking. When the server detects
-user speech during TTS playback:
+user speech during AI audio playback:
 
-1. The TTS audio stream is cancelled immediately
+1. The AI's audio output is cancelled immediately
 2. The captured speech is processed as a new turn
 3. The `VoiceStatus` transitions: `speaking` → `listening` → `processing`
 

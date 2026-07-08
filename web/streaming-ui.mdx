@@ -8,6 +8,15 @@ Streaming responses arrive as a sequence of text chunks. How you apply those chu
 determines whether the experience feels fast and polished or jittery and broken. This guide covers
 the three patterns that matter most.
 
+<Note>
+  The underlying WebSocket delivers one complete `response` frame per turn — see
+  [WebSocket streaming](/connections/websocket-streaming) for the wire protocol. The `chunk`
+  events consumed by `session.stream()` below are a client-side reveal effect the SDK builds on
+  top of that single frame, not genuine incremental network delivery. The patterns on this page
+  apply the same way either way — they're UI concerns, not wire-protocol concerns — but don't
+  expect a `chunk` frame to arrive from the network faster than the full response does.
+</Note>
+
 ---
 
 ## Pattern 1 — Cursor animation

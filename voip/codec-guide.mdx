@@ -16,7 +16,7 @@ and compatibility with your PBX or telephony provider.
 |---|---|---|---|---|
 | G.711 μ-law (PCMU) | ✅ Supported | 8 kHz | ~64 kbps | Universal — works with every PBX and carrier |
 | G.711 A-law (PCMA) | ✅ Supported | 8 kHz | ~64 kbps | European variant of G.711 |
-| G.722 | ✅ Supported | 16 kHz | ~64 kbps | Wideband — significantly better STT accuracy |
+| G.722 | ✅ Supported | 16 kHz | ~64 kbps | Wideband — significantly better transcription accuracy |
 | Opus | ✅ Supported | 8–48 kHz | 6–510 kbps | Best quality; requires modern SIP stack |
 | G.729 | ❌ Not supported | 8 kHz | ~8 kbps | Patent-encumbered; not decoded by gateway |
 | G.726 | ❌ Not supported | 8 kHz | ~16–40 kbps | ADPCM variant; not decoded by gateway |
@@ -28,8 +28,8 @@ and compatibility with your PBX or telephony provider.
 
 <AccordionGroup>
   <Accordion title="Use G.722 if your PBX supports it (recommended for most deployments)">
-    G.722 (wideband) doubles the audio bandwidth compared to G.711 narrowband. Deepgram's
-    speech-to-text model performs measurably better at 16 kHz, especially for:
+    G.722 (wideband) doubles the audio bandwidth compared to G.711 narrowband. Gemini Live —
+    the model that handles live voice — performs measurably better at 16 kHz, especially for:
 
     - Non-native English speakers
     - Noisy environments (call centres, drive-throughs)
@@ -54,7 +54,7 @@ and compatibility with your PBX or telephony provider.
     Use Opus when:
     - Your PBX or SIP stack supports it (FreeSWITCH, Kamailio, recent Asterisk builds)
     - You are using a WebRTC-to-SIP gateway
-    - You want the lowest possible word-error rate from Deepgram
+    - You want the highest possible transcription accuracy from Gemini Live
 
     **Note:** Opus requires the `opus` codec module in Asterisk (`codec_opus`). This module
     is not bundled with Asterisk and must be installed separately from Digium or Sangoma.

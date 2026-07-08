@@ -1,0 +1,62 @@
+---
+title: "Week of July 8, 2026"
+description: "Telegram bot, Mini App, and Business connections; Gemini Live voice pipeline; and a corrected session connection model across text, voice, and sandbox."
+---
+
+## New features
+
+<Update label="New" tags={["Telegram"]}>
+  **Telegram bot, Mini App, and Business connections.** Manage kiosks from a Telegram bot with
+  slash commands, connect group chats so mentioning the bot triggers a full AI conversation, run
+  a complete workspace-management Mini App inside Telegram's WebView, and let a Business account
+  auto-reply to customer DMs using a kiosk's persona. Sell plan subscriptions and PAYG credit
+  bundles with Telegram Stars.
+
+  See the new [Telegram integration section](/telegram/overview).
+</Update>
+
+<Update label="New" tags={["Voice"]}>
+  **Gemini Live voice pipeline.** Voice and VoIP sessions now run on Gemini Live — a single
+  audio-in/audio-out model that replaces the previous Deepgram STT → LLM → ElevenLabs TTS chain.
+  End-to-speech latency drops from 600–900 ms to 80–150 ms, and 90+ languages are supported
+  natively with no per-language STT/TTS configuration.
+
+  See [WebRTC voice](/connections/webrtc-voice#gemini-live-architecture).
+</Update>
+
+## Corrections
+
+<Update label="Fixed" tags={["API"]}>
+  **`agent_url` in the session-open response.** Real-time calls (WebSocket, WebRTC signalling,
+  session end) are served by a separate process from the one that opens sessions. `POST
+  /v1/sessions` now documents the `agent_url` field these calls must use — previously the docs
+  incorrectly assumed the same host for every call in a session's lifetime.
+</Update>
+
+<Update label="Fixed" tags={["API"]}>
+  **Removed the fictional REST message endpoint.** `POST /v1/sessions/{sid}/message` never
+  existed on the server — text conversation turns have always run exclusively over the
+  WebSocket at `GET {agent_url}/v1/sessions/{sid}/ws`. Docs and the interactive text/voice
+  playgrounds are corrected to match, including the real single-frame-per-turn response
+  behavior (no token-by-token `chunk` frames from the server) and the `ws-ticket` flow browsers
+  need since they can't set an `Authorization` header on a WebSocket handshake.
+</Update>
+
+<Update label="Fixed" tags={["Sandbox"]}>
+  **Sandbox is a credential property, not a separate URL.** There is no
+  `sandbox.api.humain.ai` host. Sandbox behavior is determined entirely by using an `hk_test_…`
+  credential against the same `https://api.humain.ai` — issue one from **Kiosk → Credentials**
+  in the admin panel. Sandbox text sessions echo the input verbatim and sandbox voice sessions
+  run a record → beep → echo loop; per-turn guardrail and FraudGuard checks do not run against
+  sandbox traffic.
+
+  See [Sandbox mode](/concepts/sandbox-mode).
+</Update>
+
+<Update label="Fixed" tags={["API"]}>
+  **Documented WebRTC and WebSocket error codes.** Added `INVALID_MODE`, `INVALID_SDP`,
+  `INVALID_CANDIDATE`, `NO_WEBRTC_SESSION`, `WEBRTC_RECONNECT_REQUIRED`, `SESSION_NOT_FOUND`,
+  and `MISSING_REQUIRED_VARIABLE` to the [error codes reference](/concepts/error-codes), and
+  clarified that WebSocket turn errors always carry `code: "TURN_ERROR"` with the real reason
+  embedded as a prefix in `message`.
+</Update>

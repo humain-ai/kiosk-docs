@@ -69,6 +69,13 @@ Requires Python 3.10+. The SDK has no mandatory dependencies beyond the standard
     | `"tool_call"` | `name`, `call_id` | An action endpoint was invoked |
     | `"tool_result"` | `call_id`, `status` | Action endpoint returned |
     | `"turn_end"` | `message_count: int` | Generation complete |
+
+    <Note>
+      The underlying WebSocket delivers one complete response per turn — see
+      [WebSocket streaming](/connections/websocket-streaming) for the wire protocol. `chunk`,
+      `tool_call`, and `tool_result` events are a client-side reveal built by the SDK on top of
+      that single response, not genuine incremental delivery from the network.
+    </Note>
   </Tab>
 </Tabs>
 
@@ -80,21 +87,17 @@ Requires Python 3.10+. The SDK has no mandatory dependencies beyond the standard
 from humain_kiosk import KioskClient
 
 client = KioskClient(
-    credential="hk_live_your_credential_here",
-    mode="sandbox",     # "live" in production
+    credential="hk_live_your_credential_here",  # hk_test_ for sandbox — see /concepts/sandbox-mode
     timeout=30,
     max_retries=2,
 )
 ```
 
 <ParamField body="credential" type="string" required>
-  Your device credential token in `hk_live_…` format. Issue credentials from the Humain
-  admin panel under **Kiosk → Credentials → Issue new credential**.
-</ParamField>
-
-<ParamField body="mode" type='"live" | "sandbox"' default="live">
-  `"sandbox"` returns instant stub responses without consuming AI credits. Switch to
-  `"live"` for production.
+  Your device credential token, `hk_live_…` (production) or `hk_test_…` (sandbox). Issue
+  credentials from the Humain admin panel under **Kiosk → Credentials → Issue new credential**.
+  There is no separate client mode or URL for sandbox — it's determined entirely by which
+  credential you pass. See [Sandbox mode](/concepts/sandbox-mode).
 </ParamField>
 
 <ParamField body="timeout" type="int" default="30">

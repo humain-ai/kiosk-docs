@@ -1,14 +1,15 @@
 ---
 title: "Text playground"
-description: "Send real messages to a live kiosk session using your own device credential. Switch between REST and WebSocket streaming."
+description: "Send real messages to a live kiosk session over WebSocket using your own device credential."
 mode: "wide"
 ---
 
 import PlaygroundText from '/snippets/playground-text.jsx';
 
 <Note>
-  This playground makes **real API calls**. Use a sandbox credential
-  (`https://sandbox.api.humain.ai`) to avoid consuming production LLM credits. You can issue
+  This playground makes **real API calls**. Use an `hk_test_…` sandbox credential to avoid
+  consuming production LLM credits — there is no separate sandbox URL, sandbox behavior comes
+  from the credential prefix (see [Sandbox mode](/concepts/sandbox-mode)). You can issue
   credentials from the [admin panel](https://app.humain.ai) under **Kiosk → Credentials**.
 </Note>
 

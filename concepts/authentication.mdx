@@ -23,11 +23,13 @@ Authorization: Bearer hk_live_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCd123
 
 | Component | Value | Description |
 |---|---|---|
-| Prefix | `hk_live_` | Fixed 8-character prefix — identifies this as a live device token |
+| Prefix | `hk_live_` or `hk_test_` | Fixed 8-character prefix — `hk_live_` for production, `hk_test_` for [sandbox](/concepts/sandbox-mode) |
 | Body | 43 base64url chars | 32 cryptographically random bytes, URL-safe base64 encoded |
 | Total length | 51 characters | Constant — useful for validation |
 
-A valid token always matches `/^hk_live_[A-Za-z0-9\-_]{43}$/`.
+A valid token always matches `/^hk_(live|test)_[A-Za-z0-9\-_]{43}$/`. Both prefixes work against
+the same `https://api.humain.ai` host — there is no separate sandbox URL. The prefix alone
+determines whether the session runs live or in [sandbox mode](/concepts/sandbox-mode).
 
 ## Issuing credentials
 
@@ -43,7 +45,7 @@ Credentials are managed in the admin panel under **Kiosk → Credentials**.
   </Step>
   <Step title="Issue a new credential">
     Click **Issue new credential**, give it a descriptive label (e.g. `lobby-terminal-01`),
-    and confirm.
+    choose **Live** or **Sandbox**, and confirm.
   </Step>
   <Step title="Copy the token">
     The raw token is displayed once. Copy it now — you cannot retrieve it later.

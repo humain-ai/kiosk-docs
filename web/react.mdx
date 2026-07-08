@@ -34,7 +34,6 @@ import { KioskChat, KioskVoice, useKioskSession } from "@humain/kiosk-js/react"
       return (
         <KioskChat
           credential="hk_live_your_credential_here"
-          mode="sandbox"
           onMessage={(msg) => console.log("User said:", msg)}
           onResponse={(res) => console.log("AI responded:", res)}
         />
@@ -45,12 +44,9 @@ import { KioskChat, KioskVoice, useKioskSession } from "@humain/kiosk-js/react"
     ### `<KioskChat>` props
 
     <ParamField path="credential" type="string" required>
-      Device credential token (`hk_live_…`). Pass via an environment variable — never hardcode
-      in production client bundles.
-    </ParamField>
-
-    <ParamField path="mode" type='"sandbox" | "live"' default='"live"'>
-      Environment. Use `"sandbox"` during development.
+      Device credential token, `hk_live_…` (production) or `hk_test_…` (sandbox — see
+      [Sandbox mode](/concepts/sandbox-mode)). Pass via an environment variable — never
+      hardcode in production client bundles.
     </ParamField>
 
     <ParamField path="placeholder" type="string" default='"Type a message…"'>
@@ -95,7 +91,6 @@ import { KioskChat, KioskVoice, useKioskSession } from "@humain/kiosk-js/react"
     export function StreamingChat() {
       const { session, status, openSession, closeSession } = useKioskSession({
         credential: "hk_live_your_credential_here",
-        mode: "sandbox",
       })
       const [messages, setMessages] = useState<Message[]>([])
       const [input, setInput] = useState("")
@@ -158,11 +153,7 @@ import { KioskChat, KioskVoice, useKioskSession } from "@humain/kiosk-js/react"
     ### `useKioskSession` props
 
     <ParamField path="credential" type="string" required>
-      Device credential token.
-    </ParamField>
-
-    <ParamField path="mode" type='"sandbox" | "live"' default='"live"'>
-      Environment.
+      Device credential token, `hk_live_…` (production) or `hk_test_…` (sandbox).
     </ParamField>
 
     <ParamField path="autoOpen" type="boolean" default="false">
@@ -203,7 +194,6 @@ import { KioskChat, KioskVoice, useKioskSession } from "@humain/kiosk-js/react"
       return (
         <KioskVoice
           credential="hk_live_your_credential_here"
-          mode="sandbox"
           onTranscript={(text) => console.log("Heard:", text)}
           onResponse={(text) => console.log("AI said:", text)}
         />
@@ -214,11 +204,7 @@ import { KioskChat, KioskVoice, useKioskSession } from "@humain/kiosk-js/react"
     ### `<KioskVoice>` props
 
     <ParamField path="credential" type="string" required>
-      Device credential token.
-    </ParamField>
-
-    <ParamField path="mode" type='"sandbox" | "live"' default='"live"'>
-      Environment.
+      Device credential token, `hk_live_…` (production) or `hk_test_…` (sandbox).
     </ParamField>
 
     <ParamField path="iceServers" type="RTCIceServer[]">
