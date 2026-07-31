@@ -153,18 +153,20 @@ it from the WordPress admin panel — no theme edits, no code, no build tools.
   </Accordion>
 
   <Accordion title="Custom CSS classes">
-    Add custom CSS classes to the widget container to override default styles:
+    <Warning>
+      The **Custom CSS class** field currently has no visible effect. The plugin sanitises the
+      value and passes it through to the widget script as `customClass`, but the installed
+      version of `kiosk-js` doesn't read that property anywhere — it isn't applied to the widget's
+      container or to anything inside it. Setting this field does not change the widget's
+      appearance today.
+    </Warning>
 
-    In **Settings → Humain Kiosk → Appearance**, enter space-separated class names in the
-    **Custom CSS class** field. These classes are applied to the outermost widget element.
-
-    ```css
-    /* In your theme's style.css or the WordPress Customizer */
-    .my-kiosk-override {
-      --hk-primary: #7c3aed;
-      --hk-radius: 4px;
-    }
-    ```
+    Even once that wiring is fixed, a class on the widget's outer container won't let you theme
+    the widget's internals with `--hk-*` custom properties (`--hk-primary`, `--hk-radius`, etc.).
+    The widget renders inside a shadow root that sets those variables directly from your
+    **Appearance** settings at mount time, so a `:root`- or ancestor-scoped `--hk-primary`
+    declaration is always overridden. For colour and shape, use the dedicated **Primary color**
+    field in **Settings → Humain Kiosk → Appearance** instead.
   </Accordion>
 
   <Accordion title="PHP filter hooks (for developers)">

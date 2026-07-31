@@ -1,199 +1,82 @@
 ---
 title: "Customising the widget"
-description: "CSS custom properties, theme objects, and custom component slots — make the Humain widget match your brand exactly."
+description: "What you can change about the widget's appearance today, and what's on the roadmap."
 icon: "palette"
 ---
 
-The Humain widget ships with a complete design system expressed as CSS custom properties. You can
-theme it with a few variable overrides, supply a full theme object, or replace individual components
-entirely with your own.
+<Note>
+  This page reflects what `kiosk-js` actually implements today. Deep theming (CSS custom
+  properties, a `theme` object, swappable sub-components) is not built yet — see
+  [Not yet available](#not-yet-available) below before reaching for any of that.
+</Note>
 
----
+## What you can customise today
 
-## CSS custom properties
+### Drop-in widget (`HumainWidget.init()`)
 
-Set these variables on any ancestor element (or `:root`) to override the widget's defaults.
+Appearance options are plain JS config values passed to `init()` — there is no CSS-variable layer
+underneath them. See [Configuration options](/web/drop-in-widget#configuration-options) for the
+full list; the ones that affect appearance are:
 
-<Tabs>
-  <Tab title="Light mode">
-    | Variable | Default | Description |
-    |---|---|---|
-    | `--hk-primary` | `#0E50BD` | Accent colour — FAB, send button, user message bubbles |
-    | `--hk-primary-hover` | `#0a3d8f` | Hover state of primary elements |
-    | `--hk-bg` | `#ffffff` | Widget panel background |
-    | `--hk-surface` | `#f9fafb` | Input and header background |
-    | `--hk-border` | `#e5e7eb` | Borders and dividers |
-    | `--hk-text` | `#111827` | Primary text |
-    | `--hk-text-muted` | `#6b7280` | Secondary text (timestamps, labels) |
-    | `--hk-user-bubble-bg` | `var(--hk-primary)` | User message bubble background |
-    | `--hk-user-bubble-text` | `#ffffff` | User message bubble text |
-    | `--hk-ai-bubble-bg` | `#f3f4f6` | AI message bubble background |
-    | `--hk-ai-bubble-text` | `#111827` | AI message bubble text |
-    | `--hk-radius` | `12px` | Corner radius of message bubbles |
-    | `--hk-fab-size` | `56px` | Width and height of the floating action button |
-    | `--hk-shadow` | `0 8px 30px rgba(0,0,0,0.12)` | Widget panel drop shadow |
-    | `--hk-z-index` | `9999` | CSS `z-index` of the widget container |
-    | `--hk-font` | `inherit` | Font family |
-    | `--hk-width` | `380px` | Widget panel width |
-  </Tab>
-  <Tab title="Dark mode">
-    Override these variables inside a `@media (prefers-color-scheme: dark)` block or a `.dark`
-    class to support dark mode:
-
-    | Variable | Recommended dark value | Description |
-    |---|---|---|
-    | `--hk-primary` | `#9DC2FB` | Lighter blue for dark backgrounds |
-    | `--hk-primary-hover` | `#1366E2` | |
-    | `--hk-bg` | `#18181b` | Widget panel background |
-    | `--hk-surface` | `#27272a` | Input and header background |
-    | `--hk-border` | `#3f3f46` | Borders |
-    | `--hk-text` | `#fafafa` | Primary text |
-    | `--hk-text-muted` | `#a1a1aa` | Secondary text |
-    | `--hk-ai-bubble-bg` | `#27272a` | AI bubble background |
-    | `--hk-ai-bubble-text` | `#fafafa` | AI bubble text |
-
-    ```css
-    /* Match the system preference */
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --hk-bg: #18181b;
-        --hk-surface: #27272a;
-        --hk-border: #3f3f46;
-        --hk-text: #fafafa;
-        --hk-text-muted: #a1a1aa;
-        --hk-ai-bubble-bg: #27272a;
-        --hk-ai-bubble-text: #fafafa;
-      }
-    }
-    ```
-  </Tab>
-</Tabs>
-
-### Quick brand colour override
-
-```css
-/* Apply to :root or a container element */
-:root {
-  --hk-primary:       #7c3aed; /* your brand colour */
-  --hk-primary-hover: #5b21b6;
-}
-```
-
----
-
-## Custom themes
-
-For larger-scale customisation, pass a `theme` object to `HumainWidget.init()`, `<KioskChat>`, or
-`HumainKioskClient`:
+| Option | Type | Default | Affects |
+|---|---|---|---|
+| `primaryColor` | `string` (hex) | `"#0E50BD"` | FAB background, header background, send button, user message bubbles |
+| `theme` | `"light"` \| `"dark"` \| `"auto"` | `"auto"` | Background/surface/border/text colours. `"auto"` follows `prefers-color-scheme` |
+| `zIndex` | `number` | `9999` | Stacking order of the widget |
+| `position` | `"bottom-right"` \| `"bottom-left"` | `"bottom-right"` | Corner placement |
 
 ```javascript
 HumainWidget.init({
   credential: "hk_live_your_credential_here",
-  theme: {
-    primary:         "#7c3aed",
-    primaryHover:    "#5b21b6",
-    background:      "#ffffff",
-    surface:         "#f5f3ff",
-    border:          "#ede9fe",
-    text:            "#1e1b4b",
-    textMuted:       "#6b7280",
-    radius:          "8px",
-    fabSize:         "60px",
-    width:           "400px",
-    dark: {
-      // Override any property specifically in dark mode
-      background: "#1e1b4b",
-      surface:    "#312e81",
-    },
-  },
+  primaryColor: "#7c3aed",
+  theme: "auto",
 })
 ```
 
+Everything else about the widget's look — spacing, radius, shadows, fonts, bubble colours — is
+currently fixed and not configurable.
+
+### React (`<KioskChat>`)
+
+`@humain/kiosk-js/react` exports a `KioskChat` component that renders its own chat UI with
+hardcoded inline styles. The only style hooks it accepts are `className` and `style`, which apply
+to the **outer container only** — they don't reach the header, bubbles, or input row inside it:
+
 ```tsx
-// React
+import { KioskChat } from "@humain/kiosk-js/react"
+
 <KioskChat
   credential="hk_live_your_credential_here"
-  theme={{
-    primary: "#7c3aed",
-    radius: "8px",
-  }}
+  className="my-chat-wrapper"
+  style={{ maxWidth: 420 }}
 />
 ```
 
-```vue
-// Vue
-<KioskChat
-  credential="hk_live_your_credential_here"
-  :theme="{ primary: '#7c3aed', radius: '8px' }"
-/>
-```
+### Vue (`<KioskChat>`)
+
+The Vue `KioskChat` component currently accepts no style-related props at all (`credential`,
+`mode`, `placeholder`, `title`, `initialMessage` only). Its internal styles are fixed, same as the
+React version.
 
 ---
 
-## Custom components
+## Not yet available
 
-Replace individual internal components with your own. This uses a render prop / slot pattern that
-lets you keep the widget's state machine while controlling the visual output.
+The following do **not** work despite sometimes appearing in examples elsewhere — there is no
+implementation behind them yet in `kiosk-js`:
 
-### React — render props
+- **CSS custom-property overrides.** The widget's shadow-DOM styles do set internal variables like
+  `--hk-primary` and `--hk-bg`, but they're computed from the JS config at mount time and written
+  directly onto `:host` — they never read an externally-set `:root` value. Setting `--hk-primary`
+  (or any `--hk-*` variable) on your page's `:root` has no effect on the widget.
+- **A `theme` object.** `theme` on `WidgetConfig` is a string union (`"light" | "dark" | "auto"`),
+  not an object. There is no `primary` / `background` / `surface` / `radius` / `dark: {...}`
+  theme-object API on the widget, `<KioskChat>`, or `HumainKioskClient`.
+- **Custom component slots.** There is no `components` prop on React's `<KioskChat>` and no named
+  slots on Vue's `<KioskChat>`. `MessageBubble`, `Header`, `InputArea`, `SendButton`,
+  `TypingIndicator`, and `EmptyState` are not exposed for replacement — the chat UI is rendered
+  as a single fixed component in both frameworks.
 
-```tsx
-import { KioskChat, type MessageBubbleProps } from "@humain/kiosk-js/react"
-
-// Custom message bubble
-function MyBubble({ role, content, streaming }: MessageBubbleProps) {
-  return (
-    <div className={`my-bubble my-bubble--${role}`}>
-      <span className="my-bubble__avatar">{role === "user" ? "You" : "AI"}</span>
-      <p className={streaming ? "my-bubble__text--streaming" : "my-bubble__text"}>
-        {content}
-      </p>
-    </div>
-  )
-}
-
-export function Chat() {
-  return (
-    <KioskChat
-      credential="hk_live_your_credential_here"
-      components={{
-        MessageBubble: MyBubble,
-        // Also replaceable: Header, InputArea, SendButton, TypingIndicator
-      }}
-    />
-  )
-}
-```
-
-### Vue — slots
-
-```vue
-<template>
-  <KioskChat credential="hk_live_your_credential_here">
-    <template #message="{ role, content, streaming }">
-      <div :class="['my-bubble', `my-bubble--${role}`]">
-        <span>{{ role === 'user' ? 'You' : 'AI' }}</span>
-        <p :class="{ streaming }">{{ content }}</p>
-      </div>
-    </template>
-
-    <template #header>
-      <div class="my-header">
-        <img src="/logo.svg" alt="Logo" />
-        <h2>Support</h2>
-      </div>
-    </template>
-  </KioskChat>
-</template>
-```
-
-### Available slots / render props
-
-| Name | Props / slot data | What it replaces |
-|---|---|---|
-| `MessageBubble` | `role`, `content`, `streaming` | Each message in the history list |
-| `Header` | `title`, `onClose` | The coloured header bar |
-| `InputArea` | `value`, `onChange`, `onSubmit`, `disabled` | The input field and send button row |
-| `SendButton` | `disabled`, `onClick` | The send button only, without the input field |
-| `TypingIndicator` | — | The `…` animation while waiting for the first token |
-| `EmptyState` | — | The content shown before the first message |
+If your integration needs full visual control beyond `primaryColor` / `theme` / `zIndex` today,
+build your own chat UI against the underlying `HumainKioskClient` / `Session` APIs (see
+[Vanilla JS](/web/vanilla-js)) instead of the drop-in widget or `<KioskChat>`.

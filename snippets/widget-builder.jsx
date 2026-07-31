@@ -27,11 +27,18 @@ export const DEFAULTS = {
 };
 
 // ── Design tokens ─────────────────────────────────────────────────────────
-// The widget's own blue brand palette (light mode), from customisation.mdx —
-// deliberately not the dark violet --hk-kiosk-* tokens the kiosk playgrounds
-// use. This builder configures the website widget, a different product
-// surface from the kiosk terminal demo.
-export const T = {
+// The widget's own blue brand palette, from customisation.mdx — deliberately
+// not the dark violet --hk-kiosk-* tokens the kiosk playgrounds use. This
+// builder configures the website widget, a different product surface from
+// the kiosk terminal demo.
+//
+// Two variants because the BUILDER'S OWN chrome (this page's form, panels,
+// labels) follows the docs site's current light/dark theme — see the
+// builderTheme state in WidgetBuilder below. This is unrelated to the
+// "Theme" quick-option field, which controls only the simulated widget
+// inside PreviewWidget and always uses whatever the user picks there,
+// regardless of the site's theme.
+export const LIGHT_T = {
   primary: '#0E50BD',
   primaryHover: '#0a3d8f',
   bg: '#ffffff',
@@ -39,6 +46,16 @@ export const T = {
   border: '#e5e7eb',
   text: '#111827',
   textMuted: '#6b7280',
+  radius: '12px',
+};
+export const DARK_T = {
+  primary: '#9DC2FB',
+  primaryHover: '#1366E2',
+  bg: '#18181b',
+  surface: '#27272a',
+  border: '#3f3f46',
+  text: '#fafafa',
+  textMuted: '#a1a1aa',
   radius: '12px',
 };
 
@@ -324,7 +341,7 @@ export function PreviewWidget({
   );
 }
 
-export function Field({ label, hint, children }) {
+export function Field({ T, label, hint, children }) {
   return (
     <div style={{ marginBottom: 16 }}>
       <label style={{
@@ -346,7 +363,7 @@ export function Field({ label, hint, children }) {
   );
 }
 
-export function TextInput({ value, onChange, placeholder, type = 'text' }) {
+export function TextInput({ T, value, onChange, placeholder, type = 'text' }) {
   return (
     <input
       type={type}
@@ -371,7 +388,7 @@ export function TextInput({ value, onChange, placeholder, type = 'text' }) {
   );
 }
 
-export function SegmentedControl({ options, value, onChange }) {
+export function SegmentedControl({ T, options, value, onChange }) {
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
       {options.map(opt => (
@@ -396,7 +413,7 @@ export function SegmentedControl({ options, value, onChange }) {
   );
 }
 
-export function Toggle({ checked, onChange, label }) {
+export function Toggle({ T, checked, onChange, label }) {
   return (
     <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, color: T.text }}>
       <input
@@ -407,6 +424,50 @@ export function Toggle({ checked, onChange, label }) {
       />
       {label}
     </label>
+  );
+}
+
+export function ThemeToggleButton({ T, theme, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      title={theme === 'dark' ? 'Switch builder to light mode' : 'Switch builder to dark mode'}
+      aria-label={theme === 'dark' ? 'Switch builder to light mode' : 'Switch builder to dark mode'}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 28,
+        height: 28,
+        flexShrink: 0,
+        borderRadius: 7,
+        border: `1px solid ${T.border}`,
+        background: 'transparent',
+        color: T.textMuted,
+        cursor: 'pointer',
+        padding: 0,
+      }}
+    >
+      {theme === 'dark' ? (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" fill="currentColor" />
+        </svg>
+      ) : (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="4.5" fill="currentColor" />
+          <g stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <line x1="12" y1="2" x2="12" y2="4.5" />
+            <line x1="12" y1="19.5" x2="12" y2="22" />
+            <line x1="2" y1="12" x2="4.5" y2="12" />
+            <line x1="19.5" y1="12" x2="22" y2="12" />
+            <line x1="4.9" y1="4.9" x2="6.6" y2="6.6" />
+            <line x1="17.4" y1="17.4" x2="19.1" y2="19.1" />
+            <line x1="4.9" y1="19.1" x2="6.6" y2="17.4" />
+            <line x1="17.4" y1="6.6" x2="19.1" y2="4.9" />
+          </g>
+        </svg>
+      )}
+    </button>
   );
 }
 
@@ -468,6 +529,31 @@ export function buildNpmSnippet(state) {
 // ── Main component ───────────────────────────────────────────────────────────
 
 export default function WidgetBuilder() {
+  // The builder's own chrome (this form, panels, labels) follows the docs
+  // site's current light/dark theme, read from the `dark`/`light` class
+  // Mintlify's own theme toggle sets on <html> — not the "Theme" quick
+  // option below, which only affects the simulated widget in PreviewWidget.
+  // A MutationObserver keeps it in sync if the visitor flips the site's own
+  // toggle while this page is open; the button next to "Quick options" lets
+  // them override it independently of the site.
+  const [builderTheme, setBuilderTheme] = useState(() =>
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+      ? 'dark'
+      : 'light',
+  );
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const detect = () => document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+    setBuilderTheme(detect());
+    const observer = new MutationObserver(() => setBuilderTheme(detect()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+
+  const toggleBuilderTheme = () => setBuilderTheme(t => t === 'dark' ? 'light' : 'dark');
+  const T = builderTheme === 'dark' ? DARK_T : LIGHT_T;
+
   const [mode, setMode] = useState(DEFAULTS.mode);
   const [position, setPosition] = useState(DEFAULTS.position);
   const [theme, setTheme] = useState(DEFAULTS.theme);
@@ -537,45 +623,52 @@ export default function WidgetBuilder() {
         borderRadius: 14,
         padding: 20,
       }}>
-        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: T.text }}>
-          Quick options
-        </h3>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+          <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: T.text }}>
+            Quick options
+          </h3>
+          <ThemeToggleButton T={T} theme={builderTheme} onToggle={toggleBuilderTheme} />
+        </div>
         <p style={{ margin: '0 0 16px', fontSize: 12, color: T.textMuted }}>
           Every change updates the preview on the right immediately.
         </p>
 
         <Field
+          T={T}
           label="Device credential"
           hint="For display only — the generated code always shows a placeholder. Paste your real credential when you install it."
         >
-          <TextInput type="password" value="" onChange={() => {}} placeholder="hk_live_…" />
+          <TextInput T={T} type="password" value="" onChange={() => {}} placeholder="hk_live_…" />
         </Field>
 
-        <Field label="Environment">
+        <Field T={T} label="Environment">
           <SegmentedControl
+            T={T}
             value={mode}
             onChange={setMode}
             options={[{ value: 'live', label: 'Live' }, { value: 'sandbox', label: 'Sandbox' }]}
           />
         </Field>
 
-        <Field label="Position">
+        <Field T={T} label="Position">
           <SegmentedControl
+            T={T}
             value={position}
             onChange={setPosition}
             options={[{ value: 'bottom-right', label: 'Bottom right' }, { value: 'bottom-left', label: 'Bottom left' }]}
           />
         </Field>
 
-        <Field label="Theme">
+        <Field T={T} label="Theme" hint="Governs only the simulated widget in the preview — independent of this page's own theme.">
           <SegmentedControl
+            T={T}
             value={theme}
             onChange={setTheme}
             options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'auto', label: 'Auto' }]}
           />
         </Field>
 
-        <Field label="Accent colour">
+        <Field T={T} label="Accent colour">
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input
               type="color"
@@ -584,24 +677,24 @@ export default function WidgetBuilder() {
               style={{ width: 36, height: 32, borderRadius: 6, border: `1px solid ${T.border}`, padding: 2, cursor: 'pointer' }}
             />
             <div style={{ flex: 1 }}>
-              <TextInput value={primaryColor} onChange={setPrimaryColor} placeholder="#0E50BD" />
+              <TextInput T={T} value={primaryColor} onChange={setPrimaryColor} placeholder="#0E50BD" />
             </div>
           </div>
         </Field>
 
-        <Field label="Header title">
-          <TextInput value={title} onChange={setTitle} placeholder={DEFAULTS.title} />
+        <Field T={T} label="Header title">
+          <TextInput T={T} value={title} onChange={setTitle} placeholder={DEFAULTS.title} />
         </Field>
 
-        <Field label="Input placeholder">
-          <TextInput value={placeholder} onChange={setPlaceholder} placeholder={DEFAULTS.placeholder} />
+        <Field T={T} label="Input placeholder">
+          <TextInput T={T} value={placeholder} onChange={setPlaceholder} placeholder={DEFAULTS.placeholder} />
         </Field>
 
-        <Field label="Initial message" hint="Shown automatically the first time a visitor opens the widget.">
-          <TextInput value={initialMessage} onChange={setInitialMessage} placeholder="e.g. Hi! Ask me anything about our product." />
+        <Field T={T} label="Initial message" hint="Shown automatically the first time a visitor opens the widget.">
+          <TextInput T={T} value={initialMessage} onChange={setInitialMessage} placeholder="e.g. Hi! Ask me anything about our product." />
         </Field>
 
-        <Field label="z-index">
+        <Field T={T} label="z-index">
           <input
             type="number"
             value={zIndex}
@@ -647,20 +740,22 @@ export default function WidgetBuilder() {
 
         {advancedOpen && (
           <div style={{ paddingTop: 8 }}>
-            <Field label="AI disclosure banner">
+            <Field T={T} label="AI disclosure banner">
               <Toggle
+                T={T}
                 checked={showDisclosure}
                 onChange={setShowDisclosure}
                 label="Show the AI disclosure banner (required by the EU AI Act for public deployments)"
               />
             </Field>
 
-            <Field label="Preferred language" hint="BCP-47 code. Overrides browser language detection when no language selector is shown.">
-              <TextInput value={preferredLanguage} onChange={setPreferredLanguage} placeholder="e.g. en, tr, de" />
+            <Field T={T} label="Preferred language" hint="BCP-47 code. Overrides browser language detection when no language selector is shown.">
+              <TextInput T={T} value={preferredLanguage} onChange={setPreferredLanguage} placeholder="e.g. en, tr, de" />
             </Field>
 
-            <Field label="Language selector">
+            <Field T={T} label="Language selector">
               <Toggle
+                T={T}
                 checked={languageSelectorEnabled}
                 onChange={setLanguageSelectorEnabled}
                 label="Ask visitors to pick a language before the first message"
@@ -672,10 +767,10 @@ export default function WidgetBuilder() {
                 {languages.map((l, i) => (
                   <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
                     <div style={{ width: 70 }}>
-                      <TextInput value={l.code} onChange={v => updateLanguage(i, 'code', v)} placeholder="en" />
+                      <TextInput T={T} value={l.code} onChange={v => updateLanguage(i, 'code', v)} placeholder="en" />
                     </div>
                     <div style={{ flex: 1 }}>
-                      <TextInput value={l.label} onChange={v => updateLanguage(i, 'label', v)} placeholder="English" />
+                      <TextInput T={T} value={l.label} onChange={v => updateLanguage(i, 'label', v)} placeholder="English" />
                     </div>
                     <button
                       onClick={() => removeLanguage(i)}
