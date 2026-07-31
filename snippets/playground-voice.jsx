@@ -262,12 +262,13 @@ export default function PlaygroundVoice() {
     ? { 'Content-Type': 'application/json' }
     : { 'Authorization': `Bearer ${credential}`, 'Content-Type': 'application/json' };
 
-  // WebRTC signalling (offer/ice/end) always targets agent_url directly in
-  // direct mode. In gateway mode it routes back through the gateway instead
-  // — the gateway proxies these routes for both auth (session_token in
-  // place of the raw credential) and CORS (cmd/agent's origin allowlist
-  // doesn't include arbitrary customer origins; the gateway does).
-  const signallingBase = (agentBase) => isGateway ? handshakeBase : agentBase;
+  // WebRTC signalling (offer/ice/end) always targets agent_url directly,
+  // in both auth modes — cmd/agent is already public-facing (real kiosk
+  // devices hit it directly) and its CORS now allows any origin for these
+  // routes, so there's no reason to add a gateway hop to the most
+  // latency-sensitive part of the call. Only the auth header differs:
+  // direct mode sends the raw credential, gateway mode sends the
+  // session_token minted alongside the ws-ticket.
   const signallingHeaders = () => isGateway
     ? { 'Content-Type': 'application/json', 'X-Session-Token': sessionTokenRef.current ?? '' }
     : { 'Authorization': `Bearer ${credential}`, 'Content-Type': 'application/json' };
@@ -308,8 +309,8 @@ export default function PlaygroundVoice() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? data.error);
       const sid = data.session_id;
-      // Every subsequent call (offer, ice, end) goes to agent_url in direct
-      // mode, or back through the gateway in gateway mode — see signallingBase.
+      // Every subsequent call (offer, ice, end) goes straight to agent_url,
+      // in both auth modes — never through the gateway.
       const agentBase = data.agent_url || API_BASE;
       setSessionId(sid);
       setAgentUrl(agentBase);
@@ -318,8 +319,9 @@ export default function PlaygroundVoice() {
       // 1b. Gateway mode only: mint a session_token via the same ws-ticket
       // endpoint the text playground uses. Voice doesn't need the `ticket`
       // field (that's WS-only), just the session_token it returns alongside
-      // it, since webrtc/offer, webrtc/ice, and /end all require it in
-      // place of the raw credential when going through the gateway.
+      // it — webrtc/offer, webrtc/ice, and /end all still go straight to
+      // agent_url, but send this token as X-Session-Token in place of the
+      // raw credential.
       if (isGateway) {
         const tokenRes = await fetch(`${handshakeBase}/sessions/${sid}/ws-ticket`, {
           method: 'POST',
@@ -377,8 +379,8 @@ export default function PlaygroundVoice() {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // 5. Exchange offer/answer (agent_url direct, or via the gateway)
-      const offerRes = await fetch(`${signallingBase(agentBase)}/sessions/${sid}/webrtc/offer`, {
+      // 5. Exchange offer/answer — always direct to agent_url
+      const offerRes = await fetch(`${agentBase}/v1/sessions/${sid}/webrtc/offer`, {
         method: 'POST',
         headers: signallingHeaders(),
         body: JSON.stringify({ sdp: offer.sdp }),
@@ -388,10 +390,10 @@ export default function PlaygroundVoice() {
       await pc.setRemoteDescription({ type: 'answer', sdp: offerData.sdp });
       appendTranscript('system', 'WebRTC negotiation complete. Speak into your microphone.');
 
-      // 6. Send ICE candidates (agent_url direct, or via the gateway)
+      // 6. Send ICE candidates — always direct to agent_url
       pc.onicecandidate = async ({ candidate }) => {
         if (!candidate) return;
-        await fetch(`${signallingBase(agentBase)}/sessions/${sid}/webrtc/ice`, {
+        await fetch(`${agentBase}/v1/sessions/${sid}/webrtc/ice`, {
           method: 'POST',
           headers: signallingHeaders(),
           body: JSON.stringify({
@@ -414,7 +416,7 @@ export default function PlaygroundVoice() {
   const cleanup = useCallback(async (callEnd = true) => {
     if (callEnd && sessionId && agentUrl) {
       try {
-        await fetch(`${signallingBase(agentUrl)}/sessions/${sessionId}/end`, {
+        await fetch(`${agentUrl}/v1/sessions/${sessionId}/end`, {
           method: 'POST',
           headers: signallingHeaders(),
         });
@@ -438,7 +440,7 @@ export default function PlaygroundVoice() {
     setAgentUrl(null);
     setStatus('idle');
     appendTranscript('system', 'Session ended.');
-  }, [sessionId, agentUrl, isGateway, handshakeBase, credential]);
+  }, [sessionId, agentUrl, isGateway, credential]);
 
   // ── Cleanup on unmount ────────────────────────────────────────────────────
 

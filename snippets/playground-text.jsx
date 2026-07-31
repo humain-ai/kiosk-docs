@@ -349,12 +349,11 @@ export default function PlaygroundText() {
     if (!sessionId) return;
     setLoading(true);
 
-    // Direct mode ends the session on agent_url with the raw credential;
-    // gateway mode ends it through the gateway with the session token — see
-    // /concepts/public-gateway.
-    const url = isGateway
-      ? `${handshakeBase}/sessions/${sessionId}/end`
-      : `${agentUrl}/v1/sessions/${sessionId}/end`;
+    // /end always goes straight to agent_url, in both auth modes — never
+    // through the gateway. Direct mode authorizes with the raw credential;
+    // gateway mode authorizes with the session token minted alongside the
+    // ws-ticket (X-Session-Token) — see /concepts/public-gateway.
+    const url = `${agentUrl}/v1/sessions/${sessionId}/end`;
     setRawRequest(`POST ${url}`);
 
     try {
@@ -370,7 +369,7 @@ export default function PlaygroundText() {
     } finally {
       setLoading(false);
     }
-  }, [sessionId, agentUrl, isGateway, handshakeBase, endHeaders]);
+  }, [sessionId, agentUrl, endHeaders]);
 
   // ── WebSocket send ────────────────────────────────────────────────────────
   // Browsers can't set an Authorization header on a WS handshake, so mint a

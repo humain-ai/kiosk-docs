@@ -13,10 +13,10 @@ import PlaygroundVoice from '/snippets/playground-voice.jsx';
 
   To try **Public Gateway** mode instead of a direct credential, switch the toggle below and
   paste a `pub_…` public ID. The gateway endpoint's origin allowlist must include this docs
-  site's host or the request is rejected before it reaches your kiosk. Voice signalling
-  (`webrtc/offer`, `webrtc/ice`, `/end`) is proxied through the gateway in this mode; the
-  audio itself still flows directly between your browser and the agent — see
-  [Public Gateway](/concepts/public-gateway).
+  site's host or the request is rejected before it reaches your kiosk. WebRTC signalling
+  (`webrtc/offer`, `webrtc/ice`, `/end`) and the voice media itself both go directly between
+  your browser and the agent in this mode too — the gateway is only involved in opening the
+  session and minting the session token — see [Public Gateway](/concepts/public-gateway).
 </Warning>
 
 <PlaygroundVoice />

@@ -37,8 +37,8 @@ sequenceDiagram
   GW-->>B: 201 {ticket, session_token, ...}
 
   Note over B,AG: Text: WebSocket to agent_url using the ticket
-  Note over B,AG: Voice: WebRTC signalling through the gateway using the session_token
-  Note over B,AG: Voice media (RTP/SRTP) always flows directly, never through the gateway
+  Note over B,AG: Voice: WebRTC signalling straight to agent_url using the session_token
+  Note over GW,AG: The gateway is never involved past the handshake — signalling and media both go directly browser ↔ agent
 ```
 
 `public_id` (format `pub_<43-char-base64url>`) is not a credential — it identifies which gateway
@@ -68,8 +68,9 @@ Gateway endpoints are managed in the admin panel under **Kiosk → Public Gatewa
   </Step>
   <Step title="Set rate limits">
     Configure a per-minute and a burst (10-second) request limit for this endpoint. These apply
-    to session-open and ws-ticket calls; WebRTC signalling (offer/ice/end) uses its own, more
-    generous limit — see [Rate limiting](#rate-limiting-and-jailing) below.
+    to session-open and ws-ticket calls — the only two calls that go through the gateway. WebRTC
+    signalling (offer/ice/end) never touches the gateway and is rate-limited separately, directly
+    on `cmd/agent` — see [Rate limiting](#rate-limiting-and-jailing) below.
   </Step>
   <Step title="Copy the embed base URL">
     The endpoint detail page shows an **embed base URL** of the form
@@ -79,28 +80,29 @@ Gateway endpoints are managed in the admin panel under **Kiosk → Public Gatewa
 
 ---
 
-## The five public routes
+## The two public routes
 
 All routes are under `{GATEWAY_PUBLIC_URL}/public/v1/:publicId/…` — a different host from
-`https://api.humain.ai`. No `Authorization` header is sent on any of them.
+`https://api.humain.ai`. No `Authorization` header is sent on either of them. This is the entire
+surface of the gateway — everything else a client needs (WebSocket, WebRTC signalling) talks
+straight to `agent_url`, returned from the first call below.
 
 | Route | Forwards to | Purpose |
 |---|---|---|
 | `POST /sessions` | `POST /v1/sessions` | Open a session. Same request/response shape as the [direct API](/concepts/session-lifecycle) — `mode`, `preferred_language`, `conversation_initiation_data` in; `session_id`, `agent_url`, `ice_servers` out. |
 | `POST /sessions/:sid/ws-ticket` | `POST /v1/sessions/:sid/ws-ticket` | Mint both a WebSocket ticket (for text mode) and a **session token** (for voice signalling — see below). |
-| `POST /sessions/:sid/webrtc/offer` | `POST {agent_url}/v1/sessions/:sid/webrtc/offer` | Exchange the WebRTC SDP offer/answer. Requires `X-Session-Token`. |
-| `POST /sessions/:sid/webrtc/ice` | `POST {agent_url}/v1/sessions/:sid/webrtc/ice` | Submit an ICE candidate. Requires `X-Session-Token`. |
-| `POST /sessions/:sid/end` | `POST {agent_url}/v1/sessions/:sid/end` | Close the session. Requires `X-Session-Token`. |
 
-The first two forward to the same process that serves `POST /v1/sessions` directly; the last
-three forward to the real-time agent process — a different upstream, since WebRTC signalling and
-text WebSocket connections are served separately from session open/close. All five are pure
-pass-throughs: request and response bodies are unmodified.
+Both are pure pass-throughs to the same process that serves `POST /v1/sessions` directly: request
+and response bodies are unmodified.
 
 <Info>
-  **Signalling is proxied, media is not.** Once a voice session is negotiated, audio (RTP/SRTP)
-  flows directly between the browser and the agent — the gateway is only ever in the path for the
-  handshake calls above, never for the call itself.
+  **The gateway is only in the path for these two calls.** Everything else — the WebSocket
+  connection, WebRTC signalling (offer/ICE/end), and the voice media itself — goes directly
+  between the browser and `agent_url`, never through the gateway. `cmd/agent` is already a
+  public-facing service (real kiosk devices call it directly today), so routing signalling
+  through the gateway would only add a network hop to the most latency-sensitive part of a voice
+  call without adding any real security — the session token is the actual auth boundary, not
+  which service forwarded the request.
 </Info>
 
 ---
@@ -135,11 +137,12 @@ No credential ever appears in this flow — the WebSocket ticket is single-use a
 
 ## Voice sessions and the session token
 
-WebRTC signalling calls (`webrtc/offer`, `webrtc/ice`, `end`) can't reuse the WebSocket ticket —
-a voice call needs authorization across one offer, an unbounded number of trickled ICE
-candidates, and an eventual `end` that might arrive minutes later, while the WS ticket is
-deliberately single-use. `POST /sessions/:sid/ws-ticket` mints a second token for this — a
-**session token** — alongside the WS ticket:
+WebRTC signalling calls (`webrtc/offer`, `webrtc/ice`, `end`) go straight to `agent_url`, not the
+gateway — but they still can't reuse the WebSocket ticket, since a voice call needs authorization
+across one offer, an unbounded number of trickled ICE candidates, and an eventual `end` that
+might arrive minutes later, while the WS ticket is deliberately single-use. `POST
+/sessions/:sid/ws-ticket` mints a second token for this — a **session token** — alongside the WS
+ticket:
 
 ```json
 {
@@ -150,33 +153,43 @@ deliberately single-use. `POST /sessions/:sid/ws-ticket` mints a second token fo
 }
 ```
 
-Send it as `X-Session-Token` on every signalling call:
+Send it as `X-Session-Token` on every signalling call, made directly against `agent_url` (from
+the session-open response) rather than the gateway's `BASE`:
 
 ```javascript
+// session_id and agent_url both come from the earlier POST {BASE}/sessions call.
 const { session_token } = await fetch(`${BASE}/sessions/${session_id}/ws-ticket`, {
   method: 'POST',
 }).then(r => r.json());
 
-await fetch(`${BASE}/sessions/${session_id}/webrtc/offer`, {
+await fetch(`${agent_url}/v1/sessions/${session_id}/webrtc/offer`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', 'X-Session-Token': session_token },
   body: JSON.stringify({ sdp: offer.sdp }),
 });
 ```
 
+`cmd/agent`'s CORS allows any origin for the session-token-authorized signalling routes, so this
+cross-origin call from your embed domain works without the gateway proxying it.
+
 Unlike the WS ticket, the session token is **multi-use** — it stays valid for as long as the
 session itself does, so it authorizes the offer call, every ICE candidate, and the eventual
-`end` call. Ending the session (or letting it time out) invalidates the token immediately; there
-is no separate revocation step.
+`end` call (also sent directly to `agent_url`, with the same header). Ending the session (or
+letting it time out) invalidates the token immediately; there is no separate revocation step.
 
 ---
 
 ## Rate limiting and jailing
 
-Session-open and ws-ticket calls are rate-limited per (endpoint, client IP) using the endpoint's
-configured per-minute and burst limits. WebRTC signalling calls use a separate, more generous
-fixed limit — a single voice call can fire a dozen or more ICE candidates in the first couple of
-seconds, which would exhaust a limit sized for session-open traffic.
+Session-open and ws-ticket calls — the only two that go through the gateway — are rate-limited
+per (endpoint, client IP) using the endpoint's configured per-minute and burst limits.
+
+WebRTC signalling calls never touch the gateway, so they're not covered by that limit at all.
+They're rate-limited separately, directly on `cmd/agent`, keyed on (session, client IP): 300
+requests/min with a burst of 60 per 10s — sized generously enough that a voice call trickling a
+dozen or more ICE candidates in the first couple of seconds never trips it. The session token is
+the actual security boundary for these calls, not which service forwarded the request, so this
+limit protects them the same way the gateway's limit protects session-open.
 
 A client that repeatedly trips input screening (see below) or otherwise misbehaves is
 temporarily jailed — every request from that IP to that endpoint is rejected with
