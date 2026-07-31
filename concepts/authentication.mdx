@@ -19,6 +19,13 @@ Authorization: Bearer hk_live_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789AbCd123
   immediately and store it in a secret manager (e.g. AWS Secrets Manager, Vault, Doppler).
 </Warning>
 
+<Info>
+  Browser-side integrations — a website widget, a single-page app, anything running in a
+  visitor's browser — should **not** embed a device credential in client-side code. Use the
+  [Public Gateway](/concepts/public-gateway) instead, which lets a browser open sessions without
+  ever holding this token.
+</Info>
+
 ## Token format
 
 | Component | Value | Description |

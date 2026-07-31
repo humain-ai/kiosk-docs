@@ -45,6 +45,7 @@
             "pages": [
               "introduction",
               "concepts/authentication",
+              "concepts/public-gateway",
               "concepts/session-lifecycle",
               "concepts/modes",
               "concepts/language-support",

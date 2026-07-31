@@ -4,6 +4,11 @@ const { useState, useRef, useCallback, useEffect } = React;
 // credential's prefix (hk_test_ vs hk_live_), not the URL. See /concepts/sandbox-mode.
 export const API_BASE = 'https://api.humain.ai';
 
+// The Public Gateway runs on a separate host from the Device API — see
+// /concepts/public-gateway. Requests to it carry a public_id instead of a
+// device credential and never set an Authorization header.
+export const GATEWAY_PUBLIC_URL = 'https://gateway.humain.ai';
+
 // ── Animated WebGL background (ported from kiosk-demo's Noctylis component) ──
 // Plain WebGL + GLSL, no dependencies — safe to run directly in the docs page.
 
@@ -224,7 +229,9 @@ export function StatusBar({ status, sessionId }) {
 }
 
 export default function PlaygroundVoice() {
+  const [authMode, setAuthMode] = useState('direct'); // 'direct' | 'gateway'
   const [credential, setCredential] = useState('');
+  const [publicId, setPublicId] = useState('');
   const [status, setStatus] = useState('idle');
   const [sessionId, setSessionId] = useState(null);
   const [agentUrl, setAgentUrl] = useState(null);
@@ -236,8 +243,34 @@ export default function PlaygroundVoice() {
   const streamRef = useRef(null);
   const audioElRef = useRef(null);
   const transcriptEndRef = useRef(null);
+  // Gateway mode only — the session_token minted alongside the ws-ticket
+  // right after session-open, sent as X-Session-Token on the signalling
+  // calls below. A ref (not state) so it's always fresh inside closures
+  // created before it's minted, with no re-render needed. See
+  // /concepts/public-gateway.
+  const sessionTokenRef = useRef(null);
 
-  const headers = { 'Authorization': `Bearer ${credential}`, 'Content-Type': 'application/json' };
+  const isGateway = authMode === 'gateway';
+  const readyToStart = isGateway ? !!publicId.trim() : !!credential.trim();
+
+  // Session-open and ws-ticket go to the "handshake" host: either the
+  // Device API directly, or the gateway's public-id-scoped path.
+  const handshakeBase = isGateway
+    ? `${GATEWAY_PUBLIC_URL}/public/v1/${publicId}`
+    : `${API_BASE}/v1`;
+  const handshakeHeaders = isGateway
+    ? { 'Content-Type': 'application/json' }
+    : { 'Authorization': `Bearer ${credential}`, 'Content-Type': 'application/json' };
+
+  // WebRTC signalling (offer/ice/end) always targets agent_url directly in
+  // direct mode. In gateway mode it routes back through the gateway instead
+  // — the gateway proxies these routes for both auth (session_token in
+  // place of the raw credential) and CORS (cmd/agent's origin allowlist
+  // doesn't include arbitrary customer origins; the gateway does).
+  const signallingBase = (agentBase) => isGateway ? handshakeBase : agentBase;
+  const signallingHeaders = () => isGateway
+    ? { 'Content-Type': 'application/json', 'X-Session-Token': sessionTokenRef.current ?? '' }
+    : { 'Authorization': `Bearer ${credential}`, 'Content-Type': 'application/json' };
 
   const appendTranscript = (role, text) => {
     setTranscript(prev => [...prev, { role, text, id: Date.now() }]);
@@ -257,26 +290,45 @@ export default function PlaygroundVoice() {
   // ── Start session ────────────────────────────────────────────────────────
 
   const start = useCallback(async () => {
-    if (!credential.trim()) { setError('Paste a device credential first.'); return; }
+    if (!readyToStart) {
+      setError(isGateway ? 'Paste a gateway public_id first.' : 'Paste a device credential first.');
+      return;
+    }
     setError(null);
     setTranscript([]);
     setStatus('connecting');
 
     try {
       // 1. Open session
-      const res = await fetch(`${API_BASE}/v1/sessions`, {
+      const res = await fetch(`${handshakeBase}/sessions`, {
         method: 'POST',
-        headers,
+        headers: handshakeHeaders,
         body: JSON.stringify({ mode: 'voice' }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? data.error);
       const sid = data.session_id;
-      // Every subsequent call (offer, ice, end) goes to agent_url, not API_BASE.
+      // Every subsequent call (offer, ice, end) goes to agent_url in direct
+      // mode, or back through the gateway in gateway mode — see signallingBase.
       const agentBase = data.agent_url || API_BASE;
       setSessionId(sid);
       setAgentUrl(agentBase);
       appendTranscript('system', `Session opened: ${sid}`);
+
+      // 1b. Gateway mode only: mint a session_token via the same ws-ticket
+      // endpoint the text playground uses. Voice doesn't need the `ticket`
+      // field (that's WS-only), just the session_token it returns alongside
+      // it, since webrtc/offer, webrtc/ice, and /end all require it in
+      // place of the raw credential when going through the gateway.
+      if (isGateway) {
+        const tokenRes = await fetch(`${handshakeBase}/sessions/${sid}/ws-ticket`, {
+          method: 'POST',
+          headers: handshakeHeaders,
+        });
+        const tokenData = await tokenRes.json();
+        if (!tokenRes.ok) throw new Error(tokenData.message ?? tokenData.error);
+        sessionTokenRef.current = tokenData.session_token ?? null;
+      }
 
       // 2. Get mic
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -325,10 +377,10 @@ export default function PlaygroundVoice() {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // 5. Exchange offer/answer (on agent_url)
-      const offerRes = await fetch(`${agentBase}/v1/sessions/${sid}/webrtc/offer`, {
+      // 5. Exchange offer/answer (agent_url direct, or via the gateway)
+      const offerRes = await fetch(`${signallingBase(agentBase)}/sessions/${sid}/webrtc/offer`, {
         method: 'POST',
-        headers,
+        headers: signallingHeaders(),
         body: JSON.stringify({ sdp: offer.sdp }),
       });
       const offerData = await offerRes.json();
@@ -336,12 +388,12 @@ export default function PlaygroundVoice() {
       await pc.setRemoteDescription({ type: 'answer', sdp: offerData.sdp });
       appendTranscript('system', 'WebRTC negotiation complete. Speak into your microphone.');
 
-      // 6. Send ICE candidates (on agent_url)
+      // 6. Send ICE candidates (agent_url direct, or via the gateway)
       pc.onicecandidate = async ({ candidate }) => {
         if (!candidate) return;
-        await fetch(`${agentBase}/v1/sessions/${sid}/webrtc/ice`, {
+        await fetch(`${signallingBase(agentBase)}/sessions/${sid}/webrtc/ice`, {
           method: 'POST',
-          headers,
+          headers: signallingHeaders(),
           body: JSON.stringify({
             candidate:       candidate.candidate,
             sdp_mid:         candidate.sdpMid,
@@ -355,16 +407,16 @@ export default function PlaygroundVoice() {
       setStatus('error');
       cleanup(false);
     }
-  }, [credential]);
+  }, [readyToStart, isGateway, handshakeBase, credential, publicId]);
 
   // ── Stop session ─────────────────────────────────────────────────────────
 
   const cleanup = useCallback(async (callEnd = true) => {
     if (callEnd && sessionId && agentUrl) {
       try {
-        await fetch(`${agentUrl}/v1/sessions/${sessionId}/end`, {
+        await fetch(`${signallingBase(agentUrl)}/sessions/${sessionId}/end`, {
           method: 'POST',
-          headers,
+          headers: signallingHeaders(),
         });
       } catch {}
     }
@@ -381,11 +433,12 @@ export default function PlaygroundVoice() {
       audioElRef.current = null;
     }
 
+    sessionTokenRef.current = null;
     setSessionId(null);
     setAgentUrl(null);
     setStatus('idle');
     appendTranscript('system', 'Session ended.');
-  }, [sessionId, agentUrl, credential]);
+  }, [sessionId, agentUrl, isGateway, handshakeBase, credential]);
 
   // ── Cleanup on unmount ────────────────────────────────────────────────────
 
@@ -425,14 +478,34 @@ export default function PlaygroundVoice() {
         <StatusBar status={status} sessionId={sessionId} />
       </div>
 
+      {/* ── Auth mode ────────────────────────────────────────────────────── */}
+      <div style={{ maxWidth: 420, margin: '0 auto 16px' }}>
+        <Label>Auth mode</Label>
+        <div className="hk-kiosk-toggle">
+          {[
+            { key: 'direct', label: 'Direct credential' },
+            { key: 'gateway', label: 'Public Gateway' },
+          ].map(m => (
+            <button
+              key={m.key}
+              className={authMode === m.key ? 'active' : ''}
+              onClick={() => !isActive && setAuthMode(m.key)}
+              disabled={isActive}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ── Controls ───────────────────────────────────────────────────────── */}
       <div style={{ maxWidth: 420, margin: '0 auto 16px' }}>
-        <Label>Device credential</Label>
+        <Label>{isGateway ? 'Gateway public_id' : 'Device credential'}</Label>
         <input
-          type="password"
-          placeholder="hk_live_… or hk_test_…"
-          value={credential}
-          onChange={e => setCredential(e.target.value)}
+          type={isGateway ? 'text' : 'password'}
+          placeholder={isGateway ? 'pub_…' : 'hk_live_… or hk_test_…'}
+          value={isGateway ? publicId : credential}
+          onChange={e => isGateway ? setPublicId(e.target.value) : setCredential(e.target.value)}
           disabled={isActive}
           style={{
             width: '100%',
@@ -498,7 +571,7 @@ export default function PlaygroundVoice() {
         <button
           className={btnClass}
           onClick={isActive ? () => cleanup(true) : start}
-          disabled={status === 'connecting'}
+          disabled={status === 'connecting' || (!isActive && !readyToStart)}
           title={isActive ? 'End call' : 'Start voice session'}
         >
           {/* Mic icon (SVG) — colored via currentColor, driven by .hk-voice-btn state */}

@@ -18,6 +18,11 @@ info:
     served `POST /v1/sessions`. In most deployments `agent_url` is the same public API host
     behind a reverse proxy; treat it as opaque and always use the value returned.
 
+    Browser-side integrations that cannot hold a device credential — a website widget, a
+    single-page app — should use the [Public Gateway](/concepts/public-gateway) instead of
+    calling these endpoints directly. It runs on a separate host and isn't documented in this
+    reference; see the linked page for its own request/response shapes.
+
 servers:
   - url: https://api.humain.ai
     description: Production and sandbox — sandbox behavior is selected by using an hk_test_ credential, not a different URL

@@ -11,6 +11,11 @@ import PlaygroundText from '/snippets/playground-text.jsx';
   consuming production LLM credits — there is no separate sandbox URL, sandbox behavior comes
   from the credential prefix (see [Sandbox mode](/concepts/sandbox-mode)). You can issue
   credentials from the [admin panel](https://app.humain.ai) under **Kiosk → Credentials**.
+
+  To try **Public Gateway** mode instead of a direct credential, switch the toggle below and
+  paste a `pub_…` public ID. The gateway endpoint's origin allowlist must include this docs
+  site's host or the request is rejected before it reaches your kiosk — see
+  [Public Gateway](/concepts/public-gateway).
 </Note>
 
 <PlaygroundText />

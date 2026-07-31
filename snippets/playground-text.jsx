@@ -4,6 +4,11 @@ const { useState, useRef, useCallback, useEffect } = React;
 // credential's prefix (hk_test_ vs hk_live_), not the URL. See /concepts/sandbox-mode.
 export const API_BASE = 'https://api.humain.ai';
 
+// The Public Gateway runs on a separate host from the Device API — see
+// /concepts/public-gateway. Requests to it carry a public_id instead of a
+// device credential and never set an Authorization header.
+export const GATEWAY_PUBLIC_URL = 'https://gateway.humain.ai';
+
 // ── Animated WebGL background (ported from kiosk-demo's Noctylis component) ──
 // Plain WebGL + GLSL, no dependencies — safe to run directly in the docs page.
 
@@ -259,10 +264,13 @@ export function Message({ role, text }) {
 }
 
 export default function PlaygroundText() {
+  const [authMode, setAuthMode] = useState('direct'); // 'direct' | 'gateway'
   const [credential, setCredential] = useState('');
+  const [publicId, setPublicId] = useState('');
   const [input, setInput] = useState('');
   const [sessionId, setSessionId] = useState(null);
   const [agentUrl, setAgentUrl] = useState(null);
+  const [sessionToken, setSessionToken] = useState(null); // gateway mode only — see /concepts/public-gateway
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -271,11 +279,27 @@ export default function PlaygroundText() {
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
 
-  const baseUrl = API_BASE;
-  const headers = {
-    'Authorization': `Bearer ${credential}`,
-    'Content-Type': 'application/json',
-  };
+  const isGateway = authMode === 'gateway';
+
+  // Session-open / ws-ticket base URL and headers. Direct mode sends the raw
+  // credential as a Bearer header; gateway mode sends nothing — the public_id
+  // in the path is all the gateway needs, and it resolves the real credential
+  // server-side. See /concepts/public-gateway.
+  const handshakeBase = isGateway
+    ? `${GATEWAY_PUBLIC_URL}/public/v1/${publicId}`
+    : `${API_BASE}/v1`;
+  const handshakeHeaders = isGateway
+    ? { 'Content-Type': 'application/json' }
+    : { 'Authorization': `Bearer ${credential}`, 'Content-Type': 'application/json' };
+
+  // /end headers: direct mode still uses the raw credential; gateway mode
+  // uses the session token minted alongside the ws-ticket (X-Session-Token),
+  // never a credential.
+  const endHeaders = isGateway
+    ? { 'X-Session-Token': sessionToken ?? '' }
+    : { 'Authorization': `Bearer ${credential}` };
+
+  const readyToOpen = isGateway ? !!publicId.trim() : !!credential.trim();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -289,17 +313,20 @@ export default function PlaygroundText() {
   // ── Open / close session ──────────────────────────────────────────────────
 
   const openSession = useCallback(async () => {
-    if (!credential.trim()) { setError('Paste a device credential first.'); return; }
+    if (!readyToOpen) {
+      setError(isGateway ? 'Paste a gateway public_id first.' : 'Paste a device credential first.');
+      return;
+    }
     setError(null);
     setLoading(true);
 
     const reqBody = { mode: 'text' };
-    setRawRequest(`POST ${baseUrl}/v1/sessions\n\n${JSON.stringify(reqBody, null, 2)}`);
+    setRawRequest(`POST ${handshakeBase}/sessions\n\n${JSON.stringify(reqBody, null, 2)}`);
 
     try {
-      const res = await fetch(`${baseUrl}/v1/sessions`, {
+      const res = await fetch(`${handshakeBase}/sessions`, {
         method: 'POST',
-        headers,
+        headers: handshakeHeaders,
         body: JSON.stringify(reqBody),
       });
       const data = await res.json();
@@ -307,28 +334,35 @@ export default function PlaygroundText() {
 
       if (!res.ok) throw new Error(data.message ?? data.error);
       setSessionId(data.session_id);
-      // agent_url is where every real-time call goes — not necessarily baseUrl.
-      setAgentUrl(data.agent_url || baseUrl);
+      // agent_url is where every real-time call goes, regardless of auth mode —
+      // the gateway only proxies the handshake, never the WebSocket itself.
+      setAgentUrl(data.agent_url || API_BASE);
       setMessages([]);
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [credential, baseUrl]);
+  }, [readyToOpen, isGateway, handshakeBase, handshakeHeaders]);
 
   const endSession = useCallback(async () => {
     if (!sessionId) return;
     setLoading(true);
 
-    const url = `${agentUrl}/v1/sessions/${sessionId}/end`;
+    // Direct mode ends the session on agent_url with the raw credential;
+    // gateway mode ends it through the gateway with the session token — see
+    // /concepts/public-gateway.
+    const url = isGateway
+      ? `${handshakeBase}/sessions/${sessionId}/end`
+      : `${agentUrl}/v1/sessions/${sessionId}/end`;
     setRawRequest(`POST ${url}`);
 
     try {
-      const res = await fetch(url, { method: 'POST', headers });
+      const res = await fetch(url, { method: 'POST', headers: endHeaders });
       setRawResponse(`HTTP ${res.status}`);
       setSessionId(null);
       setAgentUrl(null);
+      setSessionToken(null);
       wsRef.current?.close();
       wsRef.current = null;
     } catch (e) {
@@ -336,17 +370,21 @@ export default function PlaygroundText() {
     } finally {
       setLoading(false);
     }
-  }, [sessionId, agentUrl, credential]);
+  }, [sessionId, agentUrl, isGateway, handshakeBase, endHeaders]);
 
   // ── WebSocket send ────────────────────────────────────────────────────────
   // Browsers can't set an Authorization header on a WS handshake, so mint a
   // single-use ticket first and pass it as ?ticket= instead of the raw token.
+  // This call itself goes through the gateway in gateway mode (it's one of
+  // the two handshake routes it proxies); the WebSocket it authorizes always
+  // connects straight to agent_url either way.
 
   const sendWebSocket = useCallback(async (text) => {
-    const ticketUrl = `${agentUrl}/v1/sessions/${sessionId}/ws-ticket`;
-    const ticketRes = await fetch(ticketUrl, { method: 'POST', headers });
+    const ticketUrl = `${handshakeBase}/sessions/${sessionId}/ws-ticket`;
+    const ticketRes = await fetch(ticketUrl, { method: 'POST', headers: handshakeHeaders });
     const ticketData = await ticketRes.json();
     if (!ticketRes.ok) throw new Error(ticketData.message ?? ticketData.error);
+    if (ticketData.session_token) setSessionToken(ticketData.session_token);
 
     const wsUrl = agentUrl.replace(/^http/, 'ws');
     const fullUrl = `${wsUrl}/v1/sessions/${sessionId}/ws?ticket=${encodeURIComponent(ticketData.ticket)}`;
@@ -386,7 +424,7 @@ export default function PlaygroundText() {
         if (wsRef.current === ws) reject(new Error(`Connection closed (code ${e.code})`));
       };
     });
-  }, [sessionId, agentUrl, credential]);
+  }, [sessionId, agentUrl, handshakeBase, handshakeHeaders]);
 
   // ── Submit handler ────────────────────────────────────────────────────────
 
@@ -434,17 +472,37 @@ export default function PlaygroundText() {
         Humain Kiosk
       </div>
 
+      {/* ── Auth mode ────────────────────────────────────────────────────── */}
+      <div style={{ marginBottom: 16 }}>
+        <Label>Auth mode</Label>
+        <div className="hk-kiosk-toggle">
+          {[
+            { key: 'direct', label: 'Direct credential' },
+            { key: 'gateway', label: 'Public Gateway' },
+          ].map(m => (
+            <button
+              key={m.key}
+              className={authMode === m.key ? 'active' : ''}
+              onClick={() => !sessionId && setAuthMode(m.key)}
+              disabled={!!sessionId}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* ── Controls ─────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, alignItems: 'flex-end' }}>
 
-        {/* Credential */}
+        {/* Credential or public_id, depending on auth mode */}
         <div style={{ flex: '2 1 260px' }}>
-          <Label>Device credential</Label>
+          <Label>{isGateway ? 'Gateway public_id' : 'Device credential'}</Label>
           <input
-            type="password"
-            placeholder="hk_live_… or hk_test_…"
-            value={credential}
-            onChange={e => setCredential(e.target.value)}
+            type={isGateway ? 'text' : 'password'}
+            placeholder={isGateway ? 'pub_…' : 'hk_live_… or hk_test_…'}
+            value={isGateway ? publicId : credential}
+            onChange={e => isGateway ? setPublicId(e.target.value) : setCredential(e.target.value)}
             disabled={!!sessionId}
             style={{
               width: '100%',
@@ -469,7 +527,7 @@ export default function PlaygroundText() {
           {!sessionId ? (
             <button
               onClick={openSession}
-              disabled={loading || !credential.trim()}
+              disabled={loading || !readyToOpen}
               style={{
                 padding: '9px 16px',
                 borderRadius: 8,
@@ -479,8 +537,8 @@ export default function PlaygroundText() {
                 fontWeight: 600,
                 fontSize: 13,
                 fontFamily: 'var(--hk-kiosk-mono, monospace)',
-                cursor: loading || !credential.trim() ? 'not-allowed' : 'pointer',
-                opacity: loading || !credential.trim() ? 0.5 : 1,
+                cursor: loading || !readyToOpen ? 'not-allowed' : 'pointer',
+                opacity: loading || !readyToOpen ? 0.5 : 1,
               }}
             >
               {loading ? 'Opening…' : 'Open session'}

@@ -132,3 +132,43 @@
 @keyframes hk-ping {
   75%, 100% { transform: scale(2.4); opacity: 0; }
 }
+
+/* ─── Segmented toggle (auth mode: Direct / Public Gateway) ─────────────────── */
+
+.hk-kiosk-toggle {
+  display: inline-flex;
+  background: rgba(24, 24, 27, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.hk-kiosk-toggle button {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--hk-kiosk-mono, ui-monospace, monospace);
+  color: #71717a;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.hk-kiosk-toggle button:hover:not(:disabled) {
+  color: #e4e4e7;
+}
+
+.hk-kiosk-toggle button.active {
+  background: #9333ea;
+  color: #ffffff;
+}
+
+.hk-kiosk-toggle button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

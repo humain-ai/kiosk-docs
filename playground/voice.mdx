@@ -10,6 +10,13 @@ import PlaygroundVoice from '/snippets/playground-voice.jsx';
   This playground establishes a **real WebRTC session** using your device credential. Your
   microphone audio is streamed to the Humain servers. Use a sandbox credential to avoid
   production billing. Browser microphone permission is required.
+
+  To try **Public Gateway** mode instead of a direct credential, switch the toggle below and
+  paste a `pub_…` public ID. The gateway endpoint's origin allowlist must include this docs
+  site's host or the request is rejected before it reaches your kiosk. Voice signalling
+  (`webrtc/offer`, `webrtc/ice`, `/end`) is proxied through the gateway in this mode; the
+  audio itself still flows directly between your browser and the agent — see
+  [Public Gateway](/concepts/public-gateway).
 </Warning>
 
 <PlaygroundVoice />
