@@ -53,6 +53,11 @@ The widget loads asynchronously and does not block your page render.
 
 ## Configuration options
 
+<Tip>
+  Prefer a visual workflow? The [Widget Interface Builder](/web/widget-builder) lets you configure
+  every option below against a live preview and copies out ready-to-paste install code.
+</Tip>
+
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `credential` | `string` | **required** | Your device credential token (`hk_live_…`) |
@@ -64,6 +69,9 @@ The widget loads asynchronously and does not block your page render.
 | `placeholder` | `string` | `"Type a message…"` | Input field placeholder text |
 | `initialMessage` | `string` | — | Message displayed automatically when the widget first opens |
 | `zIndex` | `number` | `9999` | CSS `z-index` of the widget — increase if other elements overlap it |
+| `preferredLanguage` | `string` | — | BCP-47 code for all sessions opened from this widget. Overrides browser language detection |
+| `languageSelector` | `{ enabled: boolean, languages: Array<{ code, label }> }` | — | Show a language picker before the first message is sent |
+| `showDisclosure` | `boolean` | `true` | Show the AI disclosure banner at the top of the chat panel — required by the EU AI Act for public deployments |
 
 ## Programmatic control
 

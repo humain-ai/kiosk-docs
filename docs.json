@@ -94,7 +94,8 @@
               "web/svelte",
               "web/vanilla-js",
               "web/streaming-ui",
-              "web/customisation"
+              "web/customisation",
+              "web/widget-builder"
             ]
           },
           {
